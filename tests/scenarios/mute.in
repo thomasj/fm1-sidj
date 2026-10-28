@@ -1,0 +1,14 @@
+# a muted voice is silent on its own channel (the scope reads the stem, as USB audio's voice
+# channel does): no DC from its envelope left over; unmuted, it plays again
+sid @SID1@
+tap PLAY
+wait 3000
+expect scopepp0 >1000
+tap REC
+wait 1500
+expect mute0 1
+expect scopepp0 <50
+tap REC
+wait 1500
+expect mute0 0
+expect scopepp0 >1000

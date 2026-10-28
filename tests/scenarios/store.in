@@ -1,0 +1,19 @@
+# the song store: three songs in, the middle one deleted (the header's live flag cleared in
+# place), the other two still there and playable, and a song added after them goes after them
+sid @SID1@ 50
+sid @SID2@ 50
+sid @SID1@ 50
+expect songs 3
+songdel 1
+expect songs 2
+sid @SID2@ 50
+expect songs 3
+expect songsize0 >1000
+expect songsize1 >1000
+expect songsize2 >1000
+reboot
+expect songs 3
+tap PLAY
+wait 500
+expect playing 1
+expect cur 0

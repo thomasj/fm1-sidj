@@ -1,0 +1,21 @@
+# An RSID tune (@SID4@, its own interrupts) never goes out as ASID: with ASID or SID + ASID
+# picked it plays on the emulated SID, and the receiver gets nothing
+sid @SID4@
+asid rsid_asid.bin
+turn K2 1
+expect output 1
+tap PLAY
+wait 1000
+expect playing 1
+expect asid_msgs 0
+peakreset
+wait 500
+expect peak_db_min -40
+shot rsid_asid.png
+turn ALGO 1
+expect output 2
+wait 500
+expect asid_msgs 0
+turn ALGO 1
+expect output 0
+expect asid_msgs 0

@@ -1,0 +1,104 @@
+# the remix: voice select, a held key, waveform toggles while a voice button is held, solo,
+# knob pages, the octave buttons, the reset
+sid @SID1@
+tap PLAY
+wait 500
+expect playing 1
+expect voice 0
+tap SAVE
+expect voice 1
+tap ARP
+expect voice 2
+tap HOME
+expect voice 0
+# a key holds voice 1's pitch at A-4 (key 16 = A4 at octave 0, 440 Hz); release restores the tune's writes
+key 16 down
+wait 100
+expect keyon0 1
+expect freq0 7491
+key 16 up
+wait 100
+expect keyon0 0
+# octave up, the same key an octave higher
+tap OCT+
+expect octave 1
+key 16 down
+wait 100
+expect freq0 14982
+key 16 up
+wait 50
+# with HOME held, LFO toggles voice 1's noise bit; the LEDs show the waveform
+press HOME
+wait 50
+tap LFO
+wait 100
+release HOME
+wait 50
+expect voice 0
+# solo voice 2 with SAVE held + REC
+press SAVE
+tap REC
+release SAVE
+wait 50
+expect mute0 1
+expect mute1 0
+expect mute2 1
+expect voice 1
+# the OSC page: KNOB 3 tunes voice 2 in cents, up to +/-50
+tap FX
+expect page 0
+turn K3 7
+wait 50
+expect fine1 7
+expect freq1 >0
+turn K3 -200 20
+wait 50
+expect fine1 -50
+turn K3 30
+wait 50
+expect fine1 -20
+# the ENV page: KNOB 1 raises the attack of voice 2
+tap ENV
+expect page 1
+turn K1 2
+wait 50
+# the SEL page: cutoff scale
+tap SEL
+expect page 2
+turn K1 3
+wait 50
+# both octave buttons: everything back
+press OCT-
+press OCT+
+wait 50
+release OCT+
+release OCT-
+wait 100
+expect mute0 0
+expect mute2 0
+expect fine1 0
+expect octave 1
+shot remix.png
+# three octaves either way, no further (voice 2 is selected): A4's key reaches A7, F3's reaches F0
+tap OCT+
+tap OCT+
+tap OCT+
+expect octave 3
+key 16 down
+wait 100
+expect freq1 59931
+key 16 up
+wait 50
+tap OCT-
+tap OCT-
+tap OCT-
+tap OCT-
+tap OCT-
+tap OCT-
+tap OCT-
+expect octave -3
+key 0 down
+wait 100
+expect freq1 371
+key 0 up
+wait 50

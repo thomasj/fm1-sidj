@@ -1,0 +1,4 @@
+Pillow
+fonttools
+mido
+python-rtmidi

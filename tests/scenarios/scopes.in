@@ -1,0 +1,14 @@
+# the scopes: each voice as it sounds (its stem, the filter in it) while the audio has time; the
+# voice before the filter while the load valve is shut (the sound never changes)
+sid @SID1@
+tap PLAY
+wait 2000
+expect scopestems 1
+expect scopepp1 >0
+busy 1
+wait 200
+expect scopestems 0
+expect scopepp1 >0
+busy 0
+wait 200
+expect scopestems 1

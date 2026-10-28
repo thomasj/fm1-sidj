@@ -1,0 +1,8 @@
+build/
+.venv/
+*.o
+*.wav
+*.pyc
+__pycache__/
+.DS_Store
+temp/

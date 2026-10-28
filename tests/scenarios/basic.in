@@ -1,0 +1,70 @@
+# SiDJ in the simulator: the song list, play, the player screen, pause, songs by SELECT (each
+# waits for PLAY), the end of a song, the subsong, settings. @SID1@ and @SID2@ are filled in by tests/run_tests.sh.
+sid @SID1@ 50 30
+sid @SID2@ 40 40 40 40 40 40 40 40 40
+expect songs 2
+expect mode 0
+wait 100
+shot songs.png
+expect playing 0
+tap PLAY
+expect mode 1
+expect loaded 1
+expect playing 1
+expect cur 0
+wav basic.wav
+wait 2000
+expect frames >90
+expect peak_db_min -40
+shot player.png
+tap PLAY
+expect playing 0
+wait 300
+shot paused.png
+tap PLAY
+expect playing 1
+turn SELECT 1
+wait 300
+expect cur 1
+expect playing 0
+tap PLAY
+expect playing 1
+wavstop
+# the song ends after its length (4 s): it stops and waits; PLAY plays it again from the
+# start, SELECT picks the next one
+wait 4500
+expect cur 1
+expect playing 0
+wait 2600
+shot ended.png
+tap PLAY
+wait 300
+expect playing 1
+expect elapsed <10
+turn SELECT 1
+wait 300
+expect cur 0
+expect playing 0
+# the subsong: PRESETS picks it, and it waits for PLAY too; PLAY in the list starts it as picked
+turn PRESET 1
+wait 300
+expect subsong 2
+expect playing 0
+tap SEQ
+expect mode 0
+tap PLAY
+wait 300
+expect mode 1
+expect subsong 2
+expect playing 1
+tap SEQ
+expect mode 0
+# the list is grouped by composer: Martin Galway's Wizball above Rob Hubbard's Commando
+turn SELECT -1
+expect sel 1
+turn K1 1
+tap SAVE
+reboot
+expect sel 1
+tap SEQ
+expect mode 1

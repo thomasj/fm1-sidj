@@ -1,0 +1,22 @@
+# SiDJ plays one-SID tunes: a 2SID tune (@SID3@) is refused when it is loaded (two or three
+# emulated SIDs overload the FM-1), the player stays in the list, and a one-SID tune after it plays
+sid @SID3@ 50
+sid @SID1@ 50
+expect songs 2
+tap PLAY
+wait 200
+expect loaded 0
+expect playing 0
+expect mode 0
+turn SELECT 1
+tap PLAY
+wait 500
+expect mode 1
+expect loaded 1
+expect playing 1
+expect cur 1
+# SELECT in the player onto the 2SID tune: refused, the one-SID tune keeps playing
+turn SELECT 1
+wait 300
+expect cur 1
+expect playing 1

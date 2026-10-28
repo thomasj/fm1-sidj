@@ -1,0 +1,100 @@
+# a MIDI keyboard plays the keys: channels 1, 2, 3 the voices, any other the selected voice;
+# the same logic as the FM-1's keys: the newest press sounds, the lowest held takes over, the
+# octave and the keys' mode apply; all notes off releases
+sid @SID1@
+tap PLAY
+wait 500
+expect playing 1
+expect voice 0
+# channel 2: voice 2 holds A-4 (440 Hz)
+midi 91 45 64
+wait 100
+expect keyon1 1
+expect freq1 7491
+expect keyon0 0
+expect keyon2 0
+# velocity 0 is a release
+midi 91 45 00
+wait 100
+expect keyon1 0
+# channel 1: the newest press sounds, a release falls back to the one still held
+midi 90 45 64
+midi 90 51 64
+wait 100
+expect freq0 14982
+midi 80 51 40
+wait 100
+expect keyon0 1
+expect freq0 7491
+# the FM-1's key on the same voice takes over, and gives the MIDI note back when let go
+key 16 down
+wait 100
+expect keyon0 1
+key 16 up
+wait 100
+expect keyon0 1
+expect freq0 7491
+midi 80 45 40
+wait 100
+expect keyon0 0
+# channel 10: the selected voice (voice 3), and the note moves with the selection, as the
+# FM-1's keys' does
+tap ARP
+expect voice 2
+midi 99 45 64
+wait 100
+expect keyon2 1
+tap HOME
+expect voice 0
+wait 100
+expect keyon2 0
+expect keyon0 1
+expect freq0 7491
+midi 89 45 00
+wait 100
+expect keyon0 0
+# the octave buttons apply: OCT+ and A-4 sounds A-5; let go of the newest, the lowest held sounds
+tap OCT+
+expect octave 1
+midi 90 45 64
+wait 100
+expect freq0 14982
+midi 90 40 64
+midi 90 4C 64
+midi 80 4C 00
+wait 100
+expect freq0 11224
+midi 80 40 00
+midi 80 45 00
+wait 100
+expect keyon0 0
+tap OCT-
+expect octave 0
+# all notes off on a channel releases its notes only
+midi 90 45 64
+midi 92 51 64
+midi B0 7B 00
+wait 100
+expect keyon0 0
+expect keyon2 1
+midi B2 7B 00
+wait 100
+expect keyon2 0
+# transpose mode (FX held + OCT-): F#4 is 0, C5 is +6
+press FX
+tap OCT-
+release FX
+expect keymode 1
+midi 90 48 64
+wait 100
+expect shift0 6
+midi 80 48 00
+wait 100
+expect shift0 -99
+# on the song list the keyboard is quiet
+tap SEQ
+expect mode 0
+midi 90 45 64
+wait 100
+expect keyon0 0
+midi 80 45 00

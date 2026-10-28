@@ -1,0 +1,137 @@
+# the remix's second set of controls: REC alone mutes the selected voice (on release, so
+# REC + PLAY still restarts), a voice button + REC solos; SEL + a voice button toggles its
+# filter routing, SEL + LFO / EDIT / GLO the LP / BP / HP bits; FX + OCT- / OCT+ pick
+# transpose / set for the keys, SEL + OCT- / OCT+ the cutoff offset / scale (to x16);
+# both octave buttons clear it all but keep the modes
+sid @SID1@
+tap PLAY
+wait 500
+expect voice 0
+# REC alone: mute voice 1, again: back
+tap REC
+wait 30
+expect mute0 1
+tap REC
+wait 30
+expect mute0 0
+# REC + PLAY: the restart, no mute
+press REC
+tap PLAY
+release REC
+wait 100
+expect mute0 0
+expect elapsed <3
+# SAVE + REC: voice 2 alone; again: all back
+press SAVE
+tap REC
+release SAVE
+wait 30
+expect voice 1
+expect mute0 1
+expect mute1 0
+expect mute2 1
+press SAVE
+tap REC
+release SAVE
+wait 30
+expect mute0 0
+expect mute1 0
+expect mute2 0
+# SEL + HOME: voice 1's routing flips against the tune's; SEL + ARP: voice 3's; the selected
+# voice stays
+press SEL
+tap HOME
+wait 30
+expect routexor 1
+tap ARP
+wait 30
+expect routexor 5
+expect voice 1
+tap HOME
+wait 30
+expect routexor 4
+# SEL + LFO / GLO: LP and HP flip against the tune's
+tap LFO
+tap GLO
+wait 30
+expect fmodexor 80
+tap EDIT
+wait 30
+expect fmodexor 112
+release SEL
+wait 30
+expect page 2
+# FX held + OCT-: transpose; the octave stays
+press FX
+tap OCT-
+release FX
+wait 30
+expect keymode 1
+expect octave 0
+# F#4 (key 13) is no shift, F#5 (key 25) an octave, F3 (key 0) -13; released: none
+key 13 down
+wait 30
+expect shift1 0
+expect keyon1 0
+key 13 up
+key 25 down
+wait 30
+expect shift1 12
+key 25 up
+key 0 down
+wait 30
+expect shift1 -13
+key 0 up
+wait 30
+expect shift1 -99
+# FX held + OCT+: set the pitch again; the octave stays
+press FX
+tap OCT+
+release FX
+wait 30
+expect keymode 0
+expect octave 0
+key 16 down
+wait 30
+expect keyon1 1
+expect shift1 -99
+key 16 up
+wait 30
+# SEL held + OCT-: the cutoff offset, 16 a click
+press SEL
+tap OCT-
+release SEL
+wait 30
+expect cutmode 1
+turn K1 3
+wait 30
+expect cutoff_off 48
+# SEL held + OCT+: the scale, up to x16 (2048 in Q7)
+press SEL
+tap OCT+
+release SEL
+wait 30
+expect cutmode 0
+expect scale 128
+turn K1 5
+wait 30
+expect scale >128
+turn K1 80 20
+wait 30
+expect scale 2048
+turn K1 -200 20
+wait 30
+expect scale 0
+# both octave buttons: everything back, the modes kept
+press OCT-
+press OCT+
+wait 50
+release OCT+
+release OCT-
+wait 100
+expect routexor 0
+expect fmodexor 0
+expect scale 128
+expect cutmode 0
+expect keymode 0
+shot panel.png

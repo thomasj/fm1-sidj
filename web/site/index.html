@@ -1,0 +1,807 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only
+     Copyright (C) 2026 Thomas Jansson. The installer part after Felucca's installer page,
+     Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments (GPL-3.0-only). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiDJ · SID player and live remixer for the M-VAVE FM-1</title>
+<meta name="description" content="SiDJ turns the M-VAVE FM-1 into a C64 music deck: every tune in the High Voltage SID Collection on a cycle-exact Commodore 64, remixed live from the panel, out to real SID chips and over USB audio. Free and open source.">
+<meta property="og:title" content="SiDJ · SID player and live remixer for the M-VAVE FM-1">
+<meta property="og:description" content="Forty years of C64 music on the FM-1, remixed live: transpose, mute, solo, filter, LFOs, tempo and a vinyl fader. Free and open source.">
+<meta property="og:image" content="img/remix.png">
+<meta name="theme-color" content="#08090c">
+<style>
+:root {
+  --bg: #08090c; --panel: #111318; --panel2: #161921; --line: #23272f; --ink: #eceef3; --muted: #959cab; --dim: #6b7280;
+  --g: #82eb82; --r: #f0363c; --b: #5a6dff; --w: #f0f0f4; --warn: #ff8a70;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+       -webkit-font-smoothing: antialiased; }
+a { color: var(--g); text-underline-offset: 3px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+h2 { font-size: clamp(1.6rem, 3.2vw, 2.2rem); line-height: 1.15; letter-spacing: -.02em; margin: 0 0 .5rem; }
+h3 { font-size: 1.1rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
+p { margin: 0 0 .9rem; }
+.lead { font-size: clamp(1.05rem, 1.8vw, 1.22rem); color: #c9cdd6; max-width: 46ch; }
+.muted { color: var(--muted); }
+.small { font-size: .9rem; color: var(--muted); }
+.kicker { font: 600 .78rem/1 ui-monospace, Menlo, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 .8rem; }
+[hidden] { display: none !important; }
+
+/* nav */
+nav { position: sticky; top: 0; z-index: 10; background: rgba(8, 9, 12, .82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255, 255, 255, .05); }
+nav .wrap { display: flex; align-items: center; gap: 1.4rem; height: 56px; }
+nav .brand { font: 800 1.15rem/1 ui-monospace, Menlo, monospace; letter-spacing: .04em; color: var(--ink); text-decoration: none; }
+nav .brand b:nth-child(1) { color: var(--g); } nav .brand b:nth-child(2) { color: var(--r); } nav .brand b:nth-child(3) { color: var(--b); } nav .brand b:nth-child(4) { color: var(--w); }
+nav .links { display: flex; gap: 1.2rem; margin-left: auto; font-size: .92rem; }
+nav .links a { color: var(--muted); text-decoration: none; }
+nav .links a:hover { color: var(--ink); }
+@media (max-width: 640px) { nav .links a.opt { display: none; } }
+
+/* hero */
+.hero { position: relative; overflow: hidden; padding: 56px 0 72px;
+        background: radial-gradient(900px 420px at 18% -10%, rgba(90, 109, 255, .18), transparent 70%),
+                    radial-gradient(700px 360px at 92% 10%, rgba(240, 54, 60, .12), transparent 70%),
+                    radial-gradient(800px 400px at 50% 120%, rgba(130, 235, 130, .10), transparent 70%); }
+.hero .wrap { display: grid; grid-template-columns: 1.15fr .85fr; gap: 48px; align-items: center; }
+@media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; gap: 36px; } }
+#logo { width: 100%; max-width: 560px; aspect-ratio: 240 / 112; image-rendering: pixelated; display: block; margin: 0 0 18px -6px;
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 26px 0 18px; }
+.btn { display: inline-flex; align-items: center; gap: .5em; font: 600 .98rem/1 inherit; font-family: inherit; padding: .85em 1.25em; border-radius: 12px;
+       border: 1px solid var(--line); background: var(--panel2); color: var(--ink); text-decoration: none; cursor: pointer; transition: transform .12s, border-color .12s, background .12s; }
+.btn:hover { transform: translateY(-1px); border-color: #3a404c; }
+.btn.primary { background: linear-gradient(180deg, #96f396, #6fd96f); border-color: transparent; color: #08120a; box-shadow: 0 8px 28px rgba(130, 235, 130, .22); }
+.btn.ghost { background: transparent; }
+.btn:disabled { opacity: .45; cursor: default; transform: none; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { font-size: .82rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: .3em .8em; background: rgba(255, 255, 255, .02); }
+
+/* the device screen */
+.screen { position: relative; border-radius: 22px; padding: 14px; background: linear-gradient(160deg, #2a2d33, #17191d); box-shadow: 0 30px 80px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06); }
+.screen img { display: block; width: 100%; height: auto; aspect-ratio: 1; image-rendering: pixelated; border-radius: 6px; background: #000; }
+.hero .screen { max-width: 400px; justify-self: center; width: 100%; transform: rotate(1.5deg); }
+.hero .screen img { image-rendering: auto; }  /* a 4x image with square pixels: smooth when rotated */
+.hero .screen::after { content: ""; position: absolute; inset: -40px; z-index: -1; background: radial-gradient(closest-side, rgba(90, 109, 255, .25), transparent); }
+
+section { padding: 72px 0; }
+section.alt { background: linear-gradient(180deg, transparent, rgba(255, 255, 255, .015) 20%, rgba(255, 255, 255, .015) 80%, transparent); }
+
+/* gallery */
+.gallery { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 28px; }
+@media (max-width: 900px) { .gallery { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px) { .gallery { grid-template-columns: 1fr; } }
+.gallery figure { margin: 0; }
+.gallery .screen { padding: 9px; border-radius: 16px; }
+.gallery figcaption { margin-top: 12px; font-size: .92rem; color: var(--muted); }
+.gallery figcaption b { color: var(--ink); display: block; font-size: .98rem; }
+
+/* features */
+.features { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 28px; }
+@media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .features { grid-template-columns: 1fr; } }
+.feature { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 20px; position: relative; overflow: hidden; }
+.feature::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--c); box-shadow: 0 0 18px var(--c); }
+.feature .ic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; margin-bottom: 14px;
+               background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); }
+.feature p { color: var(--muted); font-size: .94rem; margin: 0; }
+
+/* steps */
+.step { display: grid; grid-template-columns: 64px 1fr; gap: 22px; margin-top: 30px; }
+@media (max-width: 600px) { .step { grid-template-columns: 1fr; gap: 10px; } }
+.num { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font: 800 1.5rem/1 ui-monospace, Menlo, monospace;
+       color: #08090c; background: var(--c); box-shadow: 0 10px 30px color-mix(in srgb, var(--c) 35%, transparent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px 22px; margin: 14px 0; }
+.card.sub { background: var(--panel2); }
+ol.steps { padding-left: 1.2rem; margin: 0 0 1rem; color: #c9cdd6; }
+ol.steps li { margin: .25rem 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+progress { width: 100%; height: 6px; margin: 14px 0 0; accent-color: var(--g); }
+.status { min-height: 1.5em; margin: 10px 0 0; }
+.warn { color: var(--warn); }
+details summary { cursor: pointer; color: var(--muted); font-size: .92rem; }
+pre.log { color: var(--dim); font-size: 12px; white-space: pre-wrap; max-height: 12rem; overflow: auto; margin: .5rem 0 0; }
+input[type=file] { display: none; }
+input[type=search] { font: inherit; width: 100%; padding: .7em .9em; border: 1px solid var(--line); border-radius: 12px; background: #0c0e12; color: var(--ink); outline: none; }
+input[type=search]:focus { border-color: #3d4452; box-shadow: 0 0 0 3px rgba(90, 109, 255, .2); }
+.btn.sm { font-size: .86rem; padding: .5em .85em; border-radius: 9px; }
+table { width: 100%; border-collapse: collapse; font-size: .94rem; margin-top: 12px; }
+th, td { text-align: left; padding: .55rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--dim); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; }
+td.num2 { color: var(--dim); font-variant-numeric: tabular-nums; width: 2rem; }
+td.len, td.size { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; font-size: .86rem; }
+td.act { white-space: nowrap; text-align: right; }
+td.act button { font: inherit; font-size: .82rem; padding: .3em .7em; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; margin-left: 4px; }
+td.act button:hover { border-color: #3a404c; }
+td .sub2 { color: var(--muted); font-size: .84rem; }
+.meter { height: 8px; background: #1d2028; border-radius: 4px; overflow: hidden; margin: 6px 0 8px; }
+.meter > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--g), var(--b)); }
+.results { max-height: 24rem; overflow: auto; margin: 12px 0 0; border: 1px solid var(--line); border-radius: 12px; background: #0c0e12; }
+.result { display: flex; align-items: center; gap: 12px; padding: .55rem .8rem; border-bottom: 1px solid var(--line); }
+.result:last-child { border-bottom: 0; }
+.result .t { flex: 1; min-width: 0; }
+.result .t b { font-weight: 600; }
+.result .t span { display: block; color: var(--dim); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result .t span.muted { display: inline; color: var(--muted); margin-left: .4em; }
+.result .btn.sm { padding: .35em .8em; }
+.result button { font: inherit; font-size: .84rem; padding: .35em .9em; border-radius: 8px; border: 1px solid #2e5a2e; background: rgba(130, 235, 130, .08); color: var(--g); cursor: pointer; }
+.drop { border-style: dashed; }
+.drop.over { border-color: var(--g); background: rgba(130, 235, 130, .05); }
+.cheats { columns: 2; column-gap: 26px; margin-top: 16px; }   /* down the first column, then the second */
+@media (max-width: 640px) { .cheats { columns: 1; } }
+.cheat { display: flex; gap: 12px; align-items: baseline; font-size: .94rem; break-inside: avoid; margin-bottom: 10px; }
+kbd { font: 600 .76rem/1.6 ui-monospace, Menlo, monospace; color: var(--ink); background: #1b1e26; border: 1px solid var(--line);
+      border-bottom-width: 2px; border-radius: 6px; padding: .1em .5em; white-space: nowrap; }
+.cheat .keys { flex: none; min-width: 10.5rem; display: flex; gap: .35em; align-items: baseline; }
+.cheat .keys i { font-style: normal; color: var(--muted); }
+.cheat .keys em { font-style: normal; font-size: .86rem; color: var(--muted); }
+.cheat > span:last-child { color: #c9cdd6; }
+p.small kbd { font-size: .72rem; } p.small i { font-style: normal; }
+.cheatgroup { font: 600 .74rem/1 ui-monospace, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 22px 0 0; }
+.cheatgroup:first-of-type { margin-top: 18px; }
+
+/* footer */
+footer { border-top: 1px solid var(--line); padding: 56px 0 64px; margin-top: 24px; background: radial-gradient(700px 300px at 50% 0%, rgba(90, 109, 255, .08), transparent 70%); }
+footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
+@media (max-width: 760px) { footer .grid { grid-template-columns: 1fr; } }
+.socials { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+.socials a { font-size: .9rem; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: .4em .95em; background: var(--panel); }
+.socials a:hover { border-color: var(--c, #3a404c); color: var(--c, var(--ink)); }
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="#top" aria-label="SiDJ"><b>S</b><b>i</b><b>D</b><b>J</b></a>
+  <div class="links"><a href="#install">Install</a><a href="#songs">Songs</a><a class="opt" href="#play">Play</a><a href="emu/">Emulator</a><a class="opt" href="https://github.com/thomasj/fm1-sidj">GitHub</a></div>
+</div></nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <h1 hidden>SiDJ</h1>
+      <canvas id="logo" width="240" height="112" role="img" aria-label="SiDJ"></canvas>
+      <p class="lead">Turn the M-VAVE FM-1 into a C64 deck. Forty years of SID music, from 1980s game themes to this year's
+        demo compo winners, play on a cycle-exact Commodore 64 inside the FM-1, and every voice is yours to remix live: transpose
+        from the keys, mute and solo, swap waveforms, sweep the filter, ride the tempo and a vinyl fader.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install on your FM-1</a>
+        <a class="btn" href="emu/">Play it in the browser</a>
+        <a class="btn ghost" href="https://github.com/thomasj/fm1-sidj">GitHub</a>
+      </div>
+      <div class="pills"><span class="pill">Free and open source, GPL-3.0</span><span class="pill">Installs from Chrome or Edge</span><span class="pill">Your files go only to your FM-1</span></div>
+    </div>
+    <div class="screen"><img src="img/remix-4x.png" alt="The FM-1's screen playing Commando by Rob Hubbard: three voices with their scopes, a square wave and two noise voices, voice 1 shifted an octave up" width="240" height="240"></div>
+  </div>
+</header>
+
+<section class="alt" id="screens">
+  <div class="wrap">
+    <p class="kicker">On the FM-1</p>
+    <h2>A tune you can play with</h2>
+    <p class="muted" style="max-width:62ch">Each voice gets its own scope, note, waveform, envelope and pulse width, and the filter is laid out beneath.
+      Whatever you change shows up in gold, with REMIX at the top, and two buttons put it all back.</p>
+    <div class="gallery">
+      <figure><div class="screen"><img src="img/songs.png" alt="The song list" loading="lazy" width="240" height="240"></div>
+        <figcaption><b>Your songs</b>The FM-1 holds a few dozen tunes at a time, grouped by composer, with their HVSC song lengths. Swap them from this page any time.</figcaption></figure>
+      <figure><div class="screen"><img src="img/remix.png" alt="Remixing Commando: voice 1 an octave up" loading="lazy" width="240" height="240"></div>
+        <figcaption><b>Live remix</b>Commando with voice 1 an octave up on KNOB 2. What you change shows in gold.</figcaption></figure>
+      <figure><div class="screen"><img src="img/both.png" alt="Wizball out to the emulation and a real SID at once" loading="lazy" width="240" height="240"></div>
+        <figcaption><b>SID + ASID</b>Wizball on the emulation and a real SID chip at the same time, the chip reached over MIDI.</figcaption></figure>
+      <figure><div class="screen"><img src="img/transpose.png" alt="The Last Ninja five semitones down" loading="lazy" width="240" height="240"></div>
+        <figcaption><b>Transpose</b>The Last Ninja, played five semitones lower from the keys, still in time. The gold TRN by voice 1 marks it.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker">What it does</p>
+    <h2>Made for playing live</h2>
+    <div class="features">
+      <div class="feature" style="--c:var(--g)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12V6h3l5-4v14l-5-4H2z"/><path d="M13 6.5a3.5 3.5 0 010 5"/></svg></div>
+        <h3>The whole of HVSC</h3><p>Tens of thousands of tunes: game classics, demo bangers, today's compo winners. Each plays on the 6581 or 8580 it was written for and stops where HVSC says it ends.</p></div>
+      <div class="feature" style="--c:var(--r)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15V9M9 15V3M15 15v-5"/><circle cx="3" cy="7" r="1.6"/><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="8" r="1.6"/></svg></div>
+        <h3>Remix every voice</h3><p>Hold a key on the FM-1 or a MIDI keyboard and the voice follows, in time. Mute, solo, swap waveforms, bend envelopes and pulse width, push the cutoff up to 16×, give each voice its own LFO, and ride the tempo and a vinyl fader. Two buttons put it all back.</p></div>
+      <div class="feature" style="--c:var(--b)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="12" height="10" rx="1.5"/><path d="M6 1v3M9 1v3M12 1v3M6 14v3M9 14v3M12 14v3"/></svg></div>
+        <h3>Real SID, USB audio</h3><p>Drive a SidStation, TherapSID, TeensyROM or USBSID-Pico over ASID, remix included, alone or alongside the emulation. Over the same cable the FM-1 is a driverless audio interface: the mix, or each voice on its own channel, straight into your DAW.</p></div>
+      <div class="feature" style="--c:var(--w)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="14" height="10" rx="1.5"/><path d="M6 16h6M9 13v3"/></svg></div>
+        <h3>Try it first</h3><p>The <a href="emu/">browser emulator</a> runs the very same firmware, panel and all. Drop a .sid on it and play.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="hood">
+  <div class="wrap">
+    <p class="kicker">Under the hood</p>
+    <h2>A real C64 in there</h2>
+    <p class="muted" style="max-width:62ch">Not a player that approximates. A Commodore 64 emulated cycle by cycle, with the SID engine
+      the C64 scene measures itself against.</p>
+    <div class="features">
+      <div class="feature" style="--c:var(--g)"><h3>Cycle-exact C64</h3><p>A 6510 with IRQ and NMI, both CIAs, the VIC's raster and bad lines.
+        Every I/O access lands on its own cycle, so stable-raster code, NMI sample players and multi-speed tunes up to 38× run as written.</p></div>
+      <div class="feature" style="--c:var(--r)"><h3>reSID inside</h3><p>A fixed-point port of reSID 0.16, bit-exact with the original, as a 6581 or
+        an 8580. The 8580's floating waveform DAC is there too, so tunes that play samples with the test bit sound as they should.</p></div>
+      <div class="feature" style="--c:var(--b)"><h3>No aliasing</h3><p>Pulse, sawtooth and the combined waveforms are averaged over every cycle of
+        each sample instead of picked once a sample: narrow pulses stay steady and edges stay clean.</p></div>
+      <div class="feature" style="--c:var(--w)"><h3>Measured, not guessed</h3><p>The SID writes match libsidplayfp's own C64 at a median of
+        99.99 % (PSID) and 99.92 % (RSID) over random HVSC tunes, and the audio load is measured on the FM-1 with the heaviest tunes found: no dropouts, by design.
+        <a href="https://github.com/thomasj/fm1-sidj#verification">The details</a>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="install">
+  <div class="wrap">
+    <p class="kicker">Get started</p>
+    <h2>Three steps</h2>
+    <div class="step" style="--c:var(--g)">
+      <div class="num">1</div>
+      <div>
+        <h3>Install SiDJ</h3>
+        <div class="card">
+          <ol class="steps">
+            <li>Open this page in <b>Chrome</b> or <b>Edge</b> on a computer. Those browsers can talk MIDI to the FM-1.</li>
+            <li>Switch the FM-1 on and connect it <b>straight to the computer</b> with a USB data cable. Close any other app that uses MIDI.</li>
+            <li>Press Install and allow MIDI when the browser asks. Keep the cable in while it writes, which takes a minute or two.</li>
+          </ol>
+          <div class="row"><button class="btn primary" id="go" disabled>Install</button> <span id="fwver" class="small mono"></span></div>
+          <label class="small" style="display:flex;gap:.5em;align-items:center;margin-top:12px"><input type="checkbox" id="withtunes" checked>
+            Put tubesockor's two tunes on it too, so there's something to play right away</label>
+          <progress id="bar" max="100" value="0"></progress>
+          <p class="status" id="status"></p>
+          <details><summary>Details</summary><pre class="log" id="log"></pre></details>
+        </div>
+        <p class="small">The installer works from M-VAVE's own firmware, from Felucca, from X0X and from other open firmwares built on Felucca's
+          updater. If a write is interrupted, the FM-1 stays in update mode: reconnect it and press Install again. If the FM-1 no longer
+          starts, it falls back by itself. Two failed starts give a safe mode where PLAY tries again, and four give the chip's own update
+          mode, which OCT− and OCT+ held for 5 seconds also reach. From there, the README's <span class="mono">tools/fm1_rescue.sh</span> or
+          M-VAVE's FM-1 Transporter puts firmware back.</p>
+        <p class="small warn">SiDJ is free software with no warranty. Installing custom firmware is at your own risk.</p>
+        <details>
+          <summary>Go back to the official firmware</summary>
+          <div class="card sub">
+            <p class="small">Download the official FM-1 V15 from <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a> and
+              choose the unmodified FM-1.fwsc. The browser checks it here and sends it nowhere else. The songs on the FM-1 are not kept,
+              because the official firmware can't read them.</p>
+            <div class="row"><label class="btn sm">Choose FM-1.fwsc<input id="stockfile" type="file" accept=".fwsc"></label>
+              <button class="btn sm" id="stockgo" disabled>Install the official firmware</button></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="step" id="songs" style="--c:var(--r)">
+      <div class="num">2</div>
+      <div>
+        <h3>Put songs on it</h3>
+        <div class="card">
+          <div class="row">
+            <button class="btn primary" id="connect">Connect to the FM-1</button>
+            <span id="devstat" class="small">Connect the FM-1 running SiDJ by USB.</span>
+          </div>
+          <div id="store" hidden>
+            <div class="meter"><div id="usedbar"></div></div>
+            <div class="row small"><span id="usedtxt"></span>
+              <button class="btn sm" id="refresh">Refresh</button>
+              <button class="btn sm" id="compact" title="Deleting leaves gaps: this fetches every song, empties the store and sends them back">Tidy up</button>
+              <button class="btn sm" id="wipe">Remove all</button></div>
+            <table><thead><tr><th>#</th><th>Song</th><th>Lengths</th><th>Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
+          </div>
+          <p class="status" id="songstat"></p>
+          <progress id="songbar" max="100" value="0" hidden></progress>
+        </div>
+        <div class="card sub" id="startercard">
+          <h3>Start with my tunes</h3>
+          <p class="small">Two tunes of mine, from HVSC and <a href="https://csdb.dk/scener/?id=39452" target="_blank" rel="noopener">CSDb</a>, come with
+            this page, with their song lengths. Add them in one go, or listen to them in the emulator first.</p>
+          <div class="results" id="starters" style="max-height:none"></div>
+          <div class="row" style="margin-top:12px"><button class="btn" id="addstarters">Add both to the FM-1</button></div>
+        </div>
+        <div class="card sub">
+          <h3>From your copy of HVSC</h3>
+          <p class="small">The High Voltage SID Collection is the archive of C64 music, free to download from
+            <a href="https://www.hvsc.c64.org/" target="_blank" rel="noopener">hvsc.c64.org</a>. Unpack it once, to a folder called C64Music.
+            Open that folder here to search it by composer, title or group. Every tune you add gets its song lengths, and the files go
+            from your disk straight to the FM-1.</p>
+          <div class="row"><button class="btn primary" id="reopen" hidden>Reopen C64Music</button>
+            <button class="btn" id="hvsc">Open the C64Music folder</button> <span id="hvscstat" class="small"></span></div>
+          <p class="small" style="margin:10px 0 0">The page remembers the folder, so next time it is one click (the browser asks to confirm).</p>
+          <div id="searchbox" hidden>
+            <p></p>
+            <input type="search" id="q" placeholder="Search: hubbard commando, galway, last ninja…" autocomplete="off">
+            <div class="results" id="results"></div>
+          </div>
+        </div>
+        <div class="card sub drop" id="drop">
+          <h3>Or single files</h3>
+          <div class="row"><label class="btn sm">Choose .sid files<input id="files" type="file" accept=".sid" multiple></label>
+            <span class="small">You can also drop them here.</span>
+            <label class="btn sm" id="slbtn">Songlengths.md5<input id="slfile" type="file" accept=".md5,.txt"></label>
+            <span id="slstat" class="small"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step" id="play" style="--c:var(--b)">
+      <div class="num">3</div>
+      <div>
+        <h3>Play and remix</h3>
+        <div class="card">
+          <p class="small">SEQ switches between the song list and the player. <kbd>A</kbd> <i>&amp;</i> <kbd>B</kbd> means hold A, then press B;
+            a voice button is HOME, SAVE or ARP. The full manual is in the
+            <a href="https://github.com/thomasj/fm1-sidj#user-manual">README</a>, and the <a href="emu/">emulator</a> lets you try every control.</p>
+          <p class="cheatgroup">Song list</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>SELECT</kbd></span><span>move through the list</span></div>
+            <div class="cheat"><span class="keys"><kbd>OCT−</kbd></span><span>eight songs up</span></div>
+            <div class="cheat"><span class="keys"><kbd>OCT+</kbd></span><span>eight songs down</span></div>
+            <div class="cheat"><span class="keys"><kbd>PLAY</kbd></span><span>play the song</span></div>
+            <div class="cheat"><span class="keys"><kbd>PRESETS</kbd></span><span>the subsong</span></div>
+            <div class="cheat"><span class="keys"><kbd>KNOB 1</kbd></span><span>the SID chip: AUTO (the tune's), 6581 or 8580</span></div>
+            <div class="cheat"><span class="keys"><kbd>KNOB 2</kbd></span><span>output: emulated SID, ASID, or both</span></div>
+            <div class="cheat"><span class="keys"><kbd>KNOB 3</kbd></span><span>USB audio: the mix, or the mix and each voice</span></div>
+            <div class="cheat"><span class="keys"><kbd>SAVE</kbd></span><span>keep these settings</span></div>
+          </div>
+          <p class="cheatgroup">Playing</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>PLAY</kbd></span><span>play or pause</span></div>
+            <div class="cheat"><span class="keys"><kbd>REC</kbd><i>&amp;</i><kbd>PLAY</kbd></span><span>play from the start</span></div>
+            <div class="cheat"><span class="keys"><kbd>SELECT</kbd></span><span>the next or previous song</span></div>
+            <div class="cheat"><span class="keys"><kbd>PRESETS</kbd></span><span>the subsong</span></div>
+            <div class="cheat"><span class="keys"><kbd>ALGORITHM</kbd></span><span>output: emulated SID, ASID, or both</span></div>
+            <div class="cheat"><span class="keys"><kbd>MASTER</kbd></span><span>the level at the audio jack</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEQ</kbd></span><span>back to the song list</span></div>
+          </div>
+          <p class="cheatgroup">Voices and keys</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>HOME</kbd></span><span>voice 1</span></div>
+            <div class="cheat"><span class="keys"><kbd>SAVE</kbd></span><span>voice 2</span></div>
+            <div class="cheat"><span class="keys"><kbd>ARP</kbd></span><span>voice 3</span></div>
+            <div class="cheat"><span class="keys"><em>the keys</em></span><span>play the selected voice</span></div>
+            <div class="cheat"><span class="keys"><kbd>OCT−</kbd></span><span>the keys an octave down, three at most</span></div>
+            <div class="cheat"><span class="keys"><kbd>OCT+</kbd></span><span>the keys an octave up, three at most</span></div>
+            <div class="cheat"><span class="keys"><kbd>FX</kbd><i>&amp;</i><kbd>OCT−</kbd></span><span>the keys transpose the tune</span></div>
+            <div class="cheat"><span class="keys"><kbd>FX</kbd><i>&amp;</i><kbd>OCT+</kbd></span><span>the keys set the pitch</span></div>
+            <div class="cheat"><span class="keys"><em>MIDI keyboard</em></span><span>plays as the keys, over USB or MIDI IN: channels 1–3 a voice each, others the selected one</span></div>
+            <div class="cheat"><span class="keys"><kbd>REC</kbd></span><span>mute or unmute the voice</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>REC</kbd></span><span>solo the voice</span></div>
+          </div>
+          <p class="cheatgroup">Waveforms</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>FX</kbd></span><span>pulse</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>SEL</kbd></span><span>triangle</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>ENV</kbd></span><span>sawtooth</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>LFO</kbd></span><span>noise</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>EDIT</kbd></span><span>sync on or off</span></div>
+            <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>GLO</kbd></span><span>ring modulation on or off</span></div>
+          </div>
+          <p class="cheatgroup">Filter</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>HOME</kbd></span><span>voice 1 through the filter, or not</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>SAVE</kbd></span><span>voice 2 through the filter, or not</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>ARP</kbd></span><span>voice 3 through the filter, or not</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>LFO</kbd></span><span>low-pass on or off</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>EDIT</kbd></span><span>band-pass on or off</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>GLO</kbd></span><span>high-pass on or off</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>OCT+</kbd></span><span>the cutoff knob scales the tune's cutoff</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd><i>&amp;</i><kbd>OCT−</kbd></span><span>the cutoff knob adds to it</span></div>
+          </div>
+          <p class="cheatgroup">Knob pages</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>FX</kbd></span><span>pulse width, octave, fine tune</span></div>
+            <div class="cheat"><span class="keys"><kbd>ENV</kbd></span><span>attack, decay, sustain, release</span></div>
+            <div class="cheat"><span class="keys"><kbd>SEL</kbd></span><span>cutoff, resonance</span></div>
+            <div class="cheat"><span class="keys"><kbd>LFO</kbd></span><span>rate, depth, target, shape: an LFO per voice</span></div>
+            <div class="cheat"><span class="keys"><kbd>GLO</kbd></span><span>tempo 25–150 %, a ±8 % vinyl fader</span></div>
+          </div>
+          <p class="cheatgroup">Back to the tune</p>
+          <div class="cheats">
+            <div class="cheat"><span class="keys"><kbd>OCT−</kbd><kbd>OCT+</kbd></span><span>pressed together: everything back</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer id="about">
+  <div class="wrap grid">
+    <div>
+      <p class="kicker">Made by</p>
+      <h2 style="font-size:1.6rem">Thomas Jansson · tubesockor</h2>
+      <p class="muted">I make chiptune and synth music as tubesockor. SiDJ grew out of playing C64 tunes on synths, and out of the ASID remixing
+        I built for TherapSID.</p>
+      <div class="socials">
+        <a href="https://github.com/thomasj" style="--c:var(--w)">GitHub · thomasj</a>
+        <a href="https://www.youtube.com/@tubesockor" style="--c:var(--r)">YouTube</a>
+        <a href="https://www.tiktok.com/@tubesockor" style="--c:var(--b)">TikTok</a>
+        <a href="https://www.instagram.com/tubesockor" style="--c:var(--g)">Instagram</a>
+        <a href="https://www.facebook.com/tubesockor" style="--c:var(--b)">Facebook</a>
+        <a href="https://twitter.com/tubesockor" style="--c:var(--w)">X</a>
+        <a href="https://tubesockor.com" style="--c:var(--g)">tubesockor.com</a>
+      </div>
+    </div>
+    <div class="small">
+      <p class="kicker">Credits</p>
+      <p>Built on <a href="https://github.com/hugelton/Felucca">Felucca</a> by Leo Kuroshita (@kurogedelic), Hügelton Instruments, which provides the
+        platform, the updater and this page's installer, by way of <a href="https://github.com/charlesvestal/fm1-x0x">X0X</a> by charlesvestal.
+        The SID engine is a port of reSID 0.16 by Dag Lem. ASID follows the <a href="https://github.com/thomasj/asid-protocol">ASID protocol</a>.</p>
+      <p>The firmware package also holds three JieLi AC79 SDK files under Apache-2.0. Licences: <a href="firmware/LICENSE">GPL-3.0</a>,
+        <a href="firmware/LICENSING.md">LICENSING.md</a>, <a href="firmware/Apache-2.0.txt">Apache-2.0</a>.</p>
+      <p>M-VAVE and FM-1 are trademarks of their owners. SiDJ is independent and not affiliated with them. The SID tunes belong to their
+        composers, and none are distributed here.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+"use strict";
+// the hero logo: the FM-1's boot intro, drawn the same way (raster bars, the pixel letters dropping
+// in, a scope morphing pulse / saw / triangle); held still for visitors who prefer less motion
+(function () {
+  const cv = document.getElementById("logo"), g = cv.getContext("2d"), W = 240, H = 112, CELL = 8;
+  const L = [[7, [0x7C, 0xC6, 0xC0, 0x7C, 0x06, 0x06, 0xC6, 0x7C]], [2, [0xC0, 0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0]],
+             [7, [0xF8, 0xCC, 0xC6, 0xC6, 0xC6, 0xC6, 0xCC, 0xF8]], [6, [0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0xCC, 0xCC, 0x78]]];
+  const COL = [[130, 235, 130], [240, 54, 60], [70, 90, 255], [240, 240, 244]];
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const mix = (a, b, q) => a.map((v, i) => Math.round(v + (b[i] - v) * q));
+  const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  function drop(t, k) {
+    const s = 200 + 130 * k, p = (t - s) / 460;
+    if (t < s) return 1000;
+    if (p >= 1) return 0;
+    if (p < .75) { const q = (.75 - p) / .75; return 120 * q * q; }
+    return 9 * Math.sin(Math.PI * (p - .75) / .25);
+  }
+  function frame(now) {
+    const t = still ? 3000 : now - t0;
+    g.clearRect(0, 0, W, H);
+    for (let k = 0; k < 3; k++) {                        // raster bars
+      const yc = 42 + 30 * Math.sin(t / 520 + k * 2.1);
+      for (let i = -8; i <= 8; i++) { g.fillStyle = css(mix(mix(COL[k], [0, 0, 0], .55), [0, 0, 0], Math.abs(i) / 9)); g.fillRect(0, Math.round(yc + i), W, 1); }
+    }
+    let cx = (W - 25 * CELL) / 2;
+    for (let pass = 0; pass < 2; pass++) {               // shadows, then faces
+      cx = (W - 25 * CELL) / 2;
+      L.forEach(([w, rows], k) => {
+        const lift = drop(t, k), y0 = 10 - lift;
+        if (lift < 1000) rows.forEach((bits, r) => { for (let c = 0; c < w; c++) if (bits & (0x80 >> c)) {
+          const x = cx + c * CELL, y = y0 + r * CELL;
+          g.fillStyle = pass ? css(mix([255, 255, 255], COL[k], (64 + r * 24) / 256)) : "rgba(0,0,0,.85)";
+          g.fillRect(x + (pass ? 0 : 3), y + (pass ? 0 : 3), CELL - 1, CELL - 1);
+        } });
+        cx += (w + 1) * CELL;
+      });
+    }
+    if (t > 800) {                                       // the scope
+      const reach = Math.min(236, (t - 800) * .4), shape = Math.floor(t / 900) % 3;
+      g.lineWidth = 1; g.strokeStyle = "rgb(235,240,255)"; g.beginPath();
+      for (let x = 2; x < 2 + reach; x++) {
+        const ph = (x * 3 + t / 3) % 256;
+        const v = shape === 0 ? (ph < 128 ? 9 : -9) : shape === 1 ? 9 - ph * 18 / 256 : (ph < 128 ? -9 + ph * 18 / 128 : 9 - (ph - 128) * 18 / 128);
+        const y = 96 - v;
+        for (let i = 1; i <= 5; i++) { g.fillStyle = css(mix([90, 120, 255], [0, 0, 0], i / 6)); g.fillRect(x, Math.round(y) + i, 1, 1); }
+        x === 2 ? g.moveTo(x, y + .5) : g.lineTo(x, y + .5);
+      }
+      g.stroke();
+    }
+    if (!still) requestAnimationFrame(frame);
+  }
+  const t0 = performance.now();
+  requestAnimationFrame(frame);
+})();
+</script>
+<script type="module">
+import { productOf, logicalImage, validateStockPackage, STOCK_V15_SIZE } from "./fm1pkg.js";
+import { Updater } from "./fm1ota.js";
+import { findFM1, parseSonglengths, md5, hex, sidInfo, fmtLen, FILE_MAX, openHvsc, readHvsc, searchHvsc, prettyPath,
+         rememberFolder, recallFolder, folderAccess, starterTunes, addMissing } from "./fm1songs.js";
+
+const $ = (id) => document.getElementById(id);
+const say = (el, text, warn = false) => { $(el).textContent = text; $(el).classList.toggle("warn", warn); };
+const log = (t) => { $("log").textContent += t + "\n"; };
+let midi = null, songs = null, image = null, meta = null, writing = false, stock = null;
+
+async function access() {
+  if (!navigator.requestMIDIAccess) throw new Error("This browser cannot talk MIDI to the FM-1: open the page in Chrome or Edge.");
+  if (!midi) {
+    try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
+    catch { throw new Error("MIDI (SysEx) was not allowed. Allow MIDI in the site settings (the icon in the address bar) and try again."); }
+  }
+  return midi;
+}
+
+// ------------------------------------------------------------------ install
+const ERR = {
+  notfound: "FM-1 not found. Check the USB cable (a data cable, straight to the computer), close other apps that use MIDI, and press Install again.",
+  model: "The connected device is not an FM-1.",
+  lost: "The USB connection was lost. Reconnect and press Install again.",
+  stopped: "The FM-1 stopped answering. Reconnect and press Install again.",
+  noloader: "The FM-1 in update mode was not found. Reconnect and press Install again: it stays in update mode until the write is finished.",
+  noreturn: "The FM-1 did not come back. Switch it off and on.",
+  mismatch: "Written, but the FM-1 reports another version: ",
+};
+function lock(on) {
+  writing = on;
+  $("go").disabled = on || !image;
+  $("stockgo").disabled = on || !stock;
+  $("connect").disabled = on;
+}
+addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault(); e.returnValue = "Writing: do not close the page."; } });
+
+(async () => {
+  try {
+    // (no-cache: the browser asks the server each time, so a new build or release is never
+    // mixed with a package it kept from before; a dev build's file name never changes)
+    const m = await fetch("firmware/manifest.json", { cache: "no-cache" });
+    if (!m.ok) throw new Error("no firmware next to this page (build the site with tools/make_site.py and serve build/site)");
+    meta = await m.json();
+    const r = await fetch("firmware/" + meta.file, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`firmware/${meta.file}: HTTP ${r.status}`);
+    const pkg = new Uint8Array(await r.arrayBuffer());
+    if (productOf(pkg) !== meta.product) throw new Error("the firmware file is damaged: reload the page");
+    image = logicalImage(pkg);
+    $("fwver").textContent = `SiDJ ${meta.version}`;
+    $("go").disabled = false;
+  } catch (e) { say("status", "Could not load the firmware: " + e.message, true); }
+})();
+
+async function install(img, product) {
+  lock(true);
+  $("bar").value = 0;
+  if (songs) disconnect();
+  try {
+    const up = new Updater(await access(), log);
+    const verifyTotal = 80, writeTotal = Math.ceil(img.length / 512);
+    const step = (k, a) => {
+      log(`${k} ${a ?? ""}`);
+      if (k === "start") say("status", "Starting");
+      if (k === "verify") { say("status", "Checking"); $("bar").value = Math.min(100, (a / (verifyTotal + writeTotal)) * 100); }
+      if (k === "loader") say("status", "Switching the FM-1 to update mode");
+      if (k === "write") { say("status", "Writing: do not unplug"); $("bar").value = Math.min(100, ((verifyTotal + a) / (verifyTotal + writeTotal)) * 100); }
+      if (k === "reboot") say("status", "Restarting");
+      if (k === "done") { $("bar").value = 100; say("status", "Done. The FM-1 is running " + (product === meta.product ? `SiDJ ${meta.version}` : "the official firmware") + "."); }
+    };
+    const ota = await up.find((id) => /^ota-/i.test(id.model));
+    let ok = true;
+    if (ota) { ota.link.close(); ok = await up.resume(img, step, product); if (!ok) say("status", ERR.stopped, true); }
+    else await up.install(img, product, step);
+    if (ok && product === meta.product && $("withtunes").checked) await tunesAfterInstall();
+  } catch (e) {
+    say("status", e.code && ERR[e.code] ? ERR[e.code] + (e.detail || "") : "Error: " + e.message, true);
+    log(String(e.stack || e));
+  }
+  lock(false);
+}
+// right after an install: SiDJ has just started; connect and add the bundled tunes it does not have
+async function tunesAfterInstall() {
+  const done = `Done. The FM-1 is running SiDJ ${meta.version}`;
+  say("status", done + ". Adding tubesockor's tunes…");
+  let dev = null;
+  for (let i = 0; i < 10 && !dev; i++) {
+    dev = await findFM1(await access());
+    if (!dev) await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!dev) { say("status", done + ". (The tunes were not added: connect in step 2 to add them.)"); return; }
+  try {
+    const n = await addMissing(dev, await starterTunes(), (t) => say("status", `${done}. Adding ${t.name}…`));
+    say("status", done + (n ? `, with tubesockor's ${n === 1 ? "tune" : "two tunes"} in its song list.` : "."));
+  } catch (e) { say("status", `${done}, but adding the tunes failed: ${e.message}. Connect in step 2 to add them.`, true); }
+  finally { dev.t.close(); }
+}
+$("go").addEventListener("click", () => { if (!writing && image) install(image, meta.product); });
+$("stockfile").addEventListener("change", async () => {
+  const f = $("stockfile").files[0];
+  stock = null; lock(false);
+  if (!f) return;
+  try {
+    if (f.size !== STOCK_V15_SIZE) throw new Error("this is not the official FM-1 V15 file (FM-1.fwsc)");
+    stock = await validateStockPackage(new Uint8Array(await f.arrayBuffer()));
+    say("status", "The official FM-1 V15 is checked and ready.");
+  } catch (e) { say("status", e.message, true); }
+  lock(false);
+});
+$("stockgo").addEventListener("click", () => {
+  if (!stock || writing) return;
+  if (confirm("Install the official firmware? The songs on the FM-1 are not kept.")) install(stock.image, stock.product);
+});
+
+// ------------------------------------------------------------------ the song store
+function disconnect() {
+  if (songs) { songs.t.close(); songs = null; }
+  $("store").hidden = true;
+  $("connect").textContent = "Connect to the FM-1";
+  say("devstat", "Not connected.");
+}
+async function connect() {
+  say("devstat", "Looking for the FM-1…");
+  try {
+    songs = await findFM1(await access());
+    if (!songs) { say("devstat", "No FM-1 running SiDJ found. Install it first (above), connect it by USB and try again.", true); return; }
+    say("devstat", `Connected: ${songs.t.name}`);
+    $("connect").textContent = "Disconnect";
+    $("store").hidden = false;
+    await refresh();
+  } catch (e) { say("devstat", e.message, true); songs = null; }
+}
+$("connect").addEventListener("click", () => (songs ? disconnect() : connect()));
+
+let busy = false;
+async function job(text, fn) {                              // one thing at a time on the cable
+  if (busy) { say("songstat", "Busy: wait for the last step to finish.", true); return; }
+  if (!songs) { say("songstat", "Connect to the FM-1 first.", true); return; }
+  busy = true;
+  say("songstat", text);
+  try { await fn(); } catch (e) { say("songstat", e.message, true); }
+  $("songbar").hidden = true;
+  busy = false;
+}
+const progress = (p) => { $("songbar").hidden = false; $("songbar").value = Math.round(p * 100); };
+
+async function refresh() {
+  const info = await songs.info(), list = await songs.list();
+  $("usedbar").style.width = `${Math.round(100 * info.used / info.size)}%`;
+  $("usedtxt").textContent = `${list.filter(Boolean).length} songs, ${Math.round(100 * info.used / info.size)}% of ${Math.round(info.size / 1024)} KB used`;
+  const tb = $("list");
+  tb.textContent = "";
+  list.forEach((e, k) => {
+    if (!e) return;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="num2"></td><td><b></b><br><span class="small"></span></td><td class="len"></td><td class="size"></td>` +
+      `<td class="act"><button>Play</button> <button>Save</button> <button>Delete</button></td>`;
+    tr.children[0].textContent = k + 1;
+    tr.querySelector("b").textContent = e.name || "(no name)";
+    tr.querySelector(".small").textContent = [e.author, e.released].filter(Boolean).join(" · ");
+    tr.children[2].textContent = e.lens.length ? e.lens.slice(0, 3).map(fmtLen).join(" ") + (e.lens.length > 3 ? ` +${e.lens.length - 3}` : "") : "no length";
+    tr.children[3].textContent = `${(e.size / 1024).toFixed(1)} KB`;
+    const [play, save, del] = tr.querySelectorAll("button");
+    play.addEventListener("click", () => job(`Playing ${e.name}`, () => songs.play(k)));
+    save.addEventListener("click", () => job(`Fetching ${e.name}`, async () => {
+      const bytes = await songs.get(k, e.size, progress), a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+      a.download = (e.name || `song${k + 1}`).replace(/[^\w .-]+/g, "_") + ".sid";
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      say("songstat", `Saved ${a.download}`);
+    }));
+    del.addEventListener("click", () => job(`Deleting ${e.name}`, async () => { await songs.delete(k); await refresh(); say("songstat", `Deleted ${e.name}`); }));
+    tb.appendChild(tr);
+  });
+  if (!list.some(Boolean)) tb.innerHTML = `<tr><td></td><td class="muted" colspan="4">No songs yet: add some below.</td></tr>`;
+}
+$("refresh").addEventListener("click", () => job("Reading the song list", async () => { await refresh(); say("songstat", ""); }));
+$("compact").addEventListener("click", () => job("Tidying up", async () => {
+  const n = await songs.compact((what, p) => { say("songstat", what === "fetch" ? "Tidying up: fetching" : "Tidying up: sending back"); progress(p); });
+  await refresh(); say("songstat", `Tidied up: ${n} songs sent back.`);
+}));
+$("wipe").addEventListener("click", () => {
+  if (confirm("Remove every song from the FM-1?")) job("Removing all songs", async () => { await songs.wipe(); await refresh(); say("songstat", "The song store is empty."); });
+});
+
+// files in: one after the other, with their lengths when known
+let lengths = null;                                          // md5 -> lengths, from HVSC or a chosen Songlengths.md5
+async function addFiles(items) {                             // [{name, bytes, lens?}]
+  await job("Adding songs", async () => {
+    let done = 0, failed = [];
+    for (const it of items) {
+      const info = sidInfo(it.bytes);
+      if (!info || it.bytes.length > FILE_MAX || info.sids > 1) {
+        failed.push(`${it.name} (${!info ? "not a .sid file" : info.sids > 1 ? `${info.sids}SID: SiDJ plays one-SID tunes` : "too big"})`); continue;
+      }
+      const lens = it.lens || (lengths && lengths.get(hex(md5(it.bytes)))) || [];
+      say("songstat", `Adding ${info.name} (${done + 1} of ${items.length})`);
+      try { await songs.put(it.bytes, lens, progress); done++; }
+      catch (e) { failed.push(`${it.name} (${e.message})`); if (/full/.test(e.message)) break; }
+    }
+    await refresh();
+    say("songstat", `${done} added.` + (failed.length ? ` Not added: ${failed.join(", ")}.` : ""), failed.length > 0);
+  });
+}
+$("files").addEventListener("change", async (e) => {
+  const items = [];
+  for (const f of e.target.files) items.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+  e.target.value = "";
+  addFiles(items);
+});
+const drop = $("drop");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", async (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+  const items = [];
+  for (const f of e.dataTransfer.files) if (/\.sid$/i.test(f.name)) items.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+  addFiles(items);
+});
+$("slfile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  lengths = parseSonglengths(await f.text()).byMd5;
+  $("slstat").textContent = `${lengths.size} song lengths loaded.`;
+});
+
+// HVSC from the user's disk: searched through its Songlengths.md5, remembered between visits
+let hvsc = null, folder = null;
+async function useFolder(dir) {
+  say("hvscstat", "Reading the collection's index…");
+  try {
+    hvsc = await openHvsc(dir);
+    lengths = hvsc.byMd5;
+    rememberFolder(dir);
+    say("hvscstat", `${hvsc.index.length} tunes. Search, then Add.`);
+    $("hvsc").textContent = "Choose another folder";
+    $("slbtn").hidden = true;
+    $("slstat").textContent = "Song lengths from your HVSC.";
+    $("searchbox").hidden = false;
+    $("q").focus();
+    search();
+  } catch (e) { say("hvscstat", "Could not read it: " + e.message, true); }
+}
+$("hvsc").addEventListener("click", async () => {
+  if (!window.isSecureContext) { say("hvscstat", "Folders open only on an https:// or localhost page (this one is " + location.protocol + "//" + location.host + ").", true); return; }
+  if (!window.showDirectoryPicker) { say("hvscstat", "This browser cannot open folders: use Chrome or Edge, or add single files below.", true); return; }
+  let dir;
+  try { dir = await showDirectoryPicker({ id: "hvsc", mode: "read" }); }
+  catch (e) {                                               // cancelled: nothing; anything else: say what
+    if (e && e.name === "AbortError") return;
+    say("hvscstat", "The browser would not open the folder (" + (e && e.name) + ": " + (e && e.message) + ").", true);
+    return;
+  }
+  await useFolder(dir);
+});
+$("reopen").addEventListener("click", async () => {
+  try { if (folder && await folderAccess(folder)) await useFolder(folder); } catch (e) { say("hvscstat", e.message, true); }
+});
+(async () => {                                              // a folder from an earlier visit: one click to reopen
+  if (!window.showDirectoryPicker) return;
+  folder = await recallFolder();
+  if (folder) { $("reopen").hidden = false; $("reopen").textContent = `Reopen ${folder.name}`; }
+})();
+function search() {
+  const box = $("results"), q = $("q").value;
+  box.textContent = "";
+  if (!q.trim()) { box.innerHTML = `<div class="result muted">Type a composer, a title or a group.</div>`; return; }
+  const hits = searchHvsc(hvsc.index, q);
+  if (!hits.length) { box.innerHTML = `<div class="result muted">Nothing found.</div>`; return; }
+  for (const e of hits) {
+    const p = prettyPath(e.path), d = document.createElement("div");
+    d.className = "result";
+    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><button>Add</button>`;
+    d.querySelector("b").textContent = p.title;
+    d.querySelectorAll(".t span")[0].textContent = e.lens.length > 1 ? `${e.lens.length} songs` : fmtLen(e.lens[0] || 0);
+    d.querySelectorAll(".t span")[1].textContent = p.where;
+    d.querySelector("button").addEventListener("click", async () => {
+      try { await addFiles([{ name: p.title, bytes: await readHvsc(hvsc.root, e.path), lens: e.lens }]); }
+      catch (err) { say("songstat", `${p.title}: ${err.message}`, true); }
+    });
+    box.appendChild(d);
+  }
+  if (hits.length >= 200) { const d = document.createElement("div"); d.className = "result muted"; d.textContent = "The first 200: type more to narrow it down."; box.appendChild(d); }
+}
+let qt = 0;
+$("q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(search, 120); });
+
+// the tunes that come with the site
+starterTunes().then((tunes) => {
+  const box = $("starters");
+  for (const t of tunes) {
+    const d = document.createElement("div");
+    d.className = "result";
+    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><a class="btn sm" href="emu/">Listen</a><button>Add</button>`;
+    d.querySelector("b").textContent = t.name;
+    d.querySelectorAll(".t span")[0].textContent = fmtLen(t.lens[0] || 0);
+    d.querySelectorAll(".t span")[1].textContent = `${t.author} · ${t.released}`;
+    d.querySelector("button").addEventListener("click", () => addFiles([{ name: t.name, bytes: t.bytes, lens: t.lens }]));
+    box.appendChild(d);
+  }
+  $("addstarters").addEventListener("click", () => addFiles(tunes.map((t) => ({ name: t.name, bytes: t.bytes, lens: t.lens }))));
+}).catch(() => { $("startercard").hidden = true; });
+</script>
+</body>
+</html>

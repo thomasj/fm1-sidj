@@ -1,0 +1,184 @@
+# GLO: the tempo, 25 to 150 % (the C64's play calls faster or slower, the chips' pitch kept) and the vinyl
+# fader (everything faster or slower); LFO: the selected voice's LFO on its pulse width, its
+# pitch or the cutoff. Both octave buttons set it all back.
+sid @SID1@
+sid @SID4@
+tap PLAY
+wait 500
+expect playing 1
+mark
+wait 1000
+expect dframes >47
+expect dframes <53
+tap GLO
+expect page 4
+turn K1 30 20
+wait 50
+expect tempo 150
+mark
+wait 1000
+expect dframes >72
+expect dframes <78
+expect peak_db_min -40
+turn K1 -40 20
+wait 50
+expect tempo 25
+mark
+wait 1000
+expect dframes >10
+expect dframes <15
+turn K1 75
+expect tempo 100
+turn K2 20 20
+wait 50
+expect vinyl 80
+mark
+wait 1000
+expect dframes >51
+expect dframes <57
+shot glo.png
+turn K2 -40 20
+expect vinyl -80
+turn K1 -3
+expect tempo 97
+# both octave buttons: the deck back to 100 % and no fader
+press OCT-
+press OCT+
+wait 50
+release OCT+
+release OCT-
+wait 100
+expect tempo 100
+expect vinyl 0
+# LFO on voice 1: a square on the pulse width, 49 % deep (the first click of a turn is a
+# single step, the rest four): +/-1003
+tap LFO
+expect page 3
+expect lfotarget0 0
+turn K3 1
+expect lfotarget0 1
+turn K4 3
+expect lfoshape0 3
+turn K2 13 20
+expect lfodepth0 49
+turn K1 10 20
+expect lforate0 37
+wait 300
+expect lfoabs0 >1001
+expect lfoabs0 <1005
+wait 2000
+shot lfo.png
+# the pitch: 49 % squared is 288 cents
+turn K3 1
+expect lfotarget0 2
+wait 200
+expect lfopw0 0
+expect lfoabs0 >286
+expect lfoabs0 <289
+# the cutoff, from voice 1's LFO
+turn K3 1
+expect lfotarget0 3
+wait 200
+expect lfocents0 0
+expect lfocutabs >1001
+expect lfocutabs <1005
+# a sine stays inside the depth
+turn K4 -3
+expect lfoshape0 0
+wait 137
+expect lfocutabs <1004
+# another voice's LFO is its own
+tap SAVE
+expect lfotarget1 0
+tap HOME
+turn K3 -3
+expect lfotarget0 0
+wait 100
+expect lfocut 0
+# the reset clears the LFOs too
+turn K3 1
+turn K2 5
+press OCT-
+press OCT+
+wait 50
+release OCT+
+release OCT-
+wait 100
+expect lfotarget0 0
+expect lfodepth0 0
+expect lfoabs0 0
+# a new song starts with the deck back at 100 % and no fader, like the rest of the remix; an
+# RSID tune (@SID4@, its own interrupts) plays at 100 % and no fader, the knobs do nothing
+tap GLO
+turn K1 30 20
+turn K2 -5
+expect tempo 150
+expect vinyl -5
+turn SELECT 1
+wait 1500
+expect cur 1
+expect playing 0
+expect tempo 100
+expect vinyl 0
+tap PLAY
+expect playing 1
+mark
+wait 1000
+expect dframes >47
+expect dframes <53
+turn K1 3
+turn K2 -3
+expect tempo 100
+expect vinyl 0
+tap LFO
+turn K3 1
+expect lfotarget0 0
+tap GLO
+wait 2500
+shot glo_rsid.png
+turn SELECT -1
+wait 1500
+expect cur 0
+expect tempo 100
+tap PLAY
+mark
+wait 1000
+expect dframes >47
+expect dframes <53
+turn K1 50 20
+expect tempo 150
+# tempo x a raised fader share the cap: at 150 % the fader goes down only; with the fader up
+# the tempo stops short (150 / 1.08 = 138)
+turn K2 5
+expect vinyl 0
+turn K2 10
+expect vinyl 0
+turn K1 -50 20
+expect tempo 25
+wait 100
+turn K1 75
+expect tempo 100
+turn K2 20 20
+expect vinyl 80
+turn K1 60 20
+expect tempo 138
+# USB audio with the voices (the SONGS screen's KNOB 3): the cap is 100 %, the deck comes down
+tap SEQ
+turn K3 1
+expect usb4 11
+wait 3000
+shot songs_usb.png
+tap SEQ
+expect tempo 100
+expect vinyl 0
+turn K1 5
+expect tempo 100
+turn K2 -80 20
+turn K1 20 20
+expect tempo 100
+tap SEQ
+turn K3 -1
+expect usb4 0
+tap SEQ
+turn K1 20 20
+expect tempo 150

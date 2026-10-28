@@ -1,0 +1,60 @@
+# ASID over USB-MIDI: ALGORITHM (KNOB 2 in SONGS) picks the output; ASID only is silent here
+# (the emulation still runs, for the scopes), SID + ASID is not; a pause sends the volume at 0 and 0x4D, at which the receiver here resets its chips (as
+# the SidStation and TherapSID do), so a resume must send every register again;
+# a new song (SELECT: it waits for PLAY) sends the chip type, and on PLAY the whole image
+# again. The stream is kept in asid.bin.
+# Commando (@SID1@) never gates a voice off and on within one play call, so no message of it
+# may hold a control register twice: that would be two frames merged into one message.
+sid @SID1@ 50
+sid @SID2@ 50
+asid asid.bin
+expect output 0
+turn K2 1
+expect output 1
+tap PLAY
+wait 1000
+expect playing 1
+expect asid_starts 1
+expect asid_types 1
+expect asid_msgs >30
+expect asid_bad 0
+peakreset
+mark
+wait 500
+expect peak_db_max -100
+expect dscope >20000
+tap PLAY
+expect playing 0
+expect asid_stops 1
+expect asid_vol_at_stop 0
+expect asid_double 0
+# a knob turned while paused reaches neither the receiver nor the volume
+tap SEL
+turn K1 3
+wait 100
+expect asid_seen0 0
+turn ALGO 1
+expect output 2
+tap PLAY
+wait 60
+expect asid_seen0 25
+wait 1000
+expect peak_db_min -40
+tap PLAY
+expect asid_stops 2
+expect asid_vol_at_stop 0
+turn SELECT 1
+wait 1500
+expect cur 1
+expect playing 0
+expect asid_types 2
+tap PLAY
+wait 60
+expect playing 1
+expect asid_seen0 25
+tap PLAY
+expect asid_vol_at_stop 0
+turn ALGO 1
+expect output 0
+expect asid_stops >2
+expect asid_bad 0
