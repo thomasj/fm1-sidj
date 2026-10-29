@@ -237,9 +237,16 @@ export class Songs {
 
 // the FM-1 among the Web MIDI ports: an in/out pair that answers INFO. The ports by forEach
 // (some iOS Web MIDI browsers' maps have no iterable values()), the output by the same name,
-// else the same name without Windows' "MIDIIN2 (...)" / "MIDIOUT2 (...)", else the only one
-// (as fm1ota.js, which the emulator page does not load)
+// else the same name without Windows' "MIDIIN2 (...)" / "MIDIOUT2 (...)", else the only one.
+// Tried: the names the installer tries (as fm1ota.js, which the emulator page does not load),
+// since macOS keeps the port name it first saw: SiDJ can show as "Felucca" or "SLOOP"
+const FM1_PORT = /fm-1|sidj|felucca|sloop|clipper|etch|jiant|ota|update|composite|sinco|usb-midi/i;
 const ports = (map) => { const a = []; map.forEach((x, y) => a.push(x && typeof x === "object" ? x : y)); return a; };
+// the MIDI inputs there are, for a "not found" message: "a, b" or "none"
+export function midiInputs(access) {
+  const names = ports(access.inputs).filter((p) => p.state !== "disconnected").map((p) => p.name || "?");
+  return names.length ? names.join(", ") : "none";
+}
 function partner(outs, input) {
   const live = outs.filter((o) => o.state !== "disconnected");
   const bare = (n) => (n || "").replace(/^MIDI(?:IN|OUT)(\d*) \((.*)\)$/i, "$2 $1");
@@ -249,7 +256,7 @@ function partner(outs, input) {
 export async function findFM1(access) {
   const outs = ports(access.outputs);
   for (const input of ports(access.inputs)) {
-    if (input.state === "disconnected" || !/fm-1|sidj/i.test(input.name || "") || /^ota/i.test(input.name || "")) continue;
+    if (input.state === "disconnected" || !FM1_PORT.test(input.name || "")) continue;   // never probe other gear
     const output = partner(outs, input);
     if (!output) continue;
     try { await input.open(); await output.open(); } catch { continue; }

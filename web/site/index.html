@@ -501,7 +501,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
 <script type="module">
 import { productOf, logicalImage, validateStockPackage, STOCK_V15_SIZE } from "./fm1pkg.js";
 import { Updater } from "./fm1ota.js";
-import { findFM1, parseSonglengths, md5, hex, sidInfo, fmtLen, FILE_MAX, openHvsc, readHvsc, searchHvsc, prettyPath,
+import { findFM1, midiInputs, parseSonglengths, md5, hex, sidInfo, fmtLen, FILE_MAX, openHvsc, readHvsc, searchHvsc, prettyPath,
          rememberFolder, recallFolder, folderAccess, starterTunes, addMissing } from "./fm1songs.js";
 
 const $ = (id) => document.getElementById(id);
@@ -624,7 +624,7 @@ async function connect() {
   say("devstat", "Looking for the FM-1…");
   try {
     songs = await findFM1(await access());
-    if (!songs) { say("devstat", "No FM-1 running SiDJ found. Install it first (above), connect it by USB and try again.", true); return; }
+    if (!songs) { say("devstat", `No FM-1 running SiDJ found. Install it first (above), connect it by USB and try again. MIDI ports seen: ${midiInputs(midi)}.`, true); return; }
     say("devstat", `Connected: ${songs.t.name}`);
     $("connect").textContent = "Disconnect";
     $("store").hidden = false;
