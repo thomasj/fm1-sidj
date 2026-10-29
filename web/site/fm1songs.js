@@ -235,12 +235,22 @@ export class Songs {
   }
 }
 
-// the FM-1 among the Web MIDI ports: a pair with the same name that answers INFO
+// the FM-1 among the Web MIDI ports: an in/out pair that answers INFO. The ports by forEach
+// (some iOS Web MIDI browsers' maps have no iterable values()), the output by the same name,
+// else the same name without Windows' "MIDIIN2 (...)" / "MIDIOUT2 (...)", else the only one
+// (as fm1ota.js, which the emulator page does not load)
+const ports = (map) => { const a = []; map.forEach((x, y) => a.push(x && typeof x === "object" ? x : y)); return a; };
+function partner(outs, input) {
+  const live = outs.filter((o) => o.state !== "disconnected");
+  const bare = (n) => (n || "").replace(/^MIDI(?:IN|OUT)(\d*) \((.*)\)$/i, "$2 $1");
+  return live.find((o) => o.name === input.name) || live.find((o) => bare(o.name) === bare(input.name)) ||
+    (live.length === 1 ? live[0] : null);
+}
 export async function findFM1(access) {
-  const outs = [...access.outputs.values()];
-  for (const input of access.inputs.values()) {
+  const outs = ports(access.outputs);
+  for (const input of ports(access.inputs)) {
     if (input.state === "disconnected" || !/fm-1|sidj/i.test(input.name || "") || /^ota/i.test(input.name || "")) continue;
-    const output = outs.find((o) => o.name === input.name && o.state !== "disconnected");
+    const output = partner(outs, input);
     if (!output) continue;
     try { await input.open(); await output.open(); } catch { continue; }
     const t = webMidiTransport(input, output), songs = new Songs(t);

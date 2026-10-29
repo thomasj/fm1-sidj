@@ -12,6 +12,24 @@ const UPGRADE = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7];
 const MAXDATA = 512;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const IS_OTA = (id) => /^ota-/i.test(id.model);
+// the MIDI ports the installer may probe (never other gear): the FM-1 under Felucca and the
+// firmwares named after themselves (SLOOP, Clipper, ETCH, JIANT), the update loaders (macOS keeps
+// a device's port name, so a loader can show as "JIANT Update"), and the names Windows and macOS
+// give the stock firmware (as thefirmwarehub.com's installer, after SLOOP 2.6)
+const FM1_PORT = /fm-1|felucca|sloop|clipper|etch|jiant|ota|update|composite|sinco|usb-midi/i;
+
+// the ports of a MIDIInputMap or MIDIOutputMap as an array, by forEach: some iOS Web MIDI
+// browsers hand out maps whose values() is not iterable, some call back with (key, port)
+const ports = (map) => { const a = []; map.forEach((x, y) => a.push(x && typeof x === "object" ? x : y)); return a; };
+
+// the output that goes with an input: the same name, else the same name once Windows'
+// "MIDIIN2 (FM-1)" / "MIDIOUT2 (FM-1)" numbering is taken off, else the only output there is
+function partner(outs, input) {
+  const live = outs.filter((o) => o.state !== "disconnected");
+  const bare = (n) => (n || "").replace(/^MIDI(?:IN|OUT)(\d*) \((.*)\)$/i, "$2 $1");
+  return live.find((o) => o.name === input.name) || live.find((o) => bare(o.name) === bare(input.name)) ||
+    (live.length === 1 ? live[0] : null);
+}
 
 // errors carry a code the pages translate: notfound, model, stopped, noloader, lost, noreturn,
 // mismatch (detail: the identity the device reports), badreq
@@ -114,13 +132,13 @@ export class Updater {
     this.log = log || (() => {});
   }
 
-  // every in/out pair with the same port name that answers the handshake
+  // the first in/out pair that answers the handshake
   async find(filter) {
-    const outs = [...this.access.outputs.values()];
-    for (const input of this.access.inputs.values()) {
+    const outs = ports(this.access.outputs);
+    for (const input of ports(this.access.inputs)) {
       if (input.state === "disconnected") continue;
-      if (!/fm-1|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
-      const output = outs.find((o) => o.name === input.name && o.state !== "disconnected");
+      if (!FM1_PORT.test(input.name || "")) continue;   // never probe other gear
+      const output = partner(outs, input);
       if (!output) continue;
       try { await input.open(); await output.open(); } catch (_) { continue; }
       const link = new Link(input, output);
@@ -129,6 +147,12 @@ export class Updater {
       link.close();
     }
     return null;
+  }
+
+  // the MIDI inputs there are, for the "not found" message: " a, b." (a port skipped by its name shows)
+  seen() {
+    const names = ports(this.access.inputs).filter((p) => p.state !== "disconnected").map((p) => p.name || "?");
+    return names.length ? ` ${names.join(", ")}.` : " none.";
   }
 
   async waitFor(filter, ms) {
@@ -174,7 +198,7 @@ export class Updater {
   async install(image, product, onStep) {
     const step = onStep || (() => {});
     const dev = await this.find((id) => !IS_OTA(id));
-    if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)");
+    if (!dev) throw fail("notfound", "FM-1 not found (USB cable, and no other app using it?)", this.seen());
     const [model] = product.split("_");
     if (dev.id.model !== model) { dev.link.close(); throw fail("model", `the device is ${dev.id.text}, the package is for ${product}`); }
     step("start", dev.id.text);
