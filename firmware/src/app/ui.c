@@ -27,6 +27,7 @@
  * songs.c. */
 
 enum { UI_SONGS, UI_PLAYER };
+#define SIDJ_SITE "thomasj.github.io/fm1-sidj"   /* where songs go on (the web page's step 2), for an empty list */
 #define BRAND_G RGB(130, 235, 130)          /* the brand: the intro's logo, the song list's groups */
 #define BRAND_R RGB(240, 54, 60)
 #define BRAND_B RGB(70, 90, 255)
@@ -487,7 +488,7 @@ static void ui_octave_btn(uint32_t pressed, uint32_t released, uint32_t held)
 static void ui_play_btn(uint32_t held)
 {
     if (ui.mode == UI_SONGS) {
-        if (!song_count) { ui_say("NO SONGS: USE tools/fm1_sid.py", 0); return; }
+        if (!song_count) { ui_say("NO SONGS YET: SEE ABOVE", 0); return; }
         if (ui.sel == ui.cur && eng_loaded && !eng_playing && !ui.ended) eng_post(EV_PLAY, 0, 0, 0);   /* loaded and waiting (its subsong kept) */
         else if (ui_load(ui.sel, 0, 1)) return;
         ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui.dirty_top = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
@@ -748,7 +749,7 @@ static void draw_top(void)                  /* rows 0 .. 35 */
         }
     } else if (!nm) {
         cv_text(6, 2, &FONT_B, "SiDJ", C_HI);
-        cv_text(6, 20, &FONT_XS, song_count ? "SELECT A SONG, PRESS PLAY" : "NO SONGS: tools/fm1_sid.py put", C_GRAY);
+        cv_text(6, 20, &FONT_XS, song_count ? "SELECT A SONG, PRESS PLAY" : "ADD SONGS AT " SIDJ_SITE, C_GRAY);
     } else {
         int32_t nx, tx;                     /* the song number's x, the transport's */
         ui_num(t, ui.subsong); ui_cat(t, "/"); ui_num(t + ui_strlen(t), ui.nsongs);
@@ -894,7 +895,9 @@ static void draw_list(void)                 /* rows 36 .. 215: the songs, under 
             cv_rect(0, 0, 3, bh, C_LINE);
             cv_rect(0, ty, 3, th, C_AMB);
         }
-        if (!song_count && !band) cv_text(6, 4, &FONT_S, "EMPTY. FROM THE COMPUTER:", C_GRAY), cv_text(6, 24, &FONT_XS, "tools/fm1_sid.py put SONG.sid", C_AMB);
+        if (!song_count && !band)
+            cv_text(6, 4, &FONT_S, "NO SONGS YET. ADD THEM AT", C_GRAY), cv_text(6, 24, &FONT_S, SIDJ_SITE, C_AMB),
+            cv_text(6, 46, &FONT_XS, "IN CHROME OR EDGE, THE FM-1 ON USB", C_GRAY);
         cv_blit(0, (uint32_t)(36 + band));
     }
 }
