@@ -20,6 +20,9 @@
  *   master N                     MASTER pot 0..4096
  *   sid FILE [LEN_DS ...]        a .sid file into the song pool, with song lengths in deciseconds
  *   songdel K                    delete entry K (0-based) as the transfer's DELETE does
+ *   songraw SIZE                 a SIZE-byte file into the song pool (any bytes: lays out entries exactly)
+ *   poolwrite OFF LEN BYTE       LEN bytes of the pool from OFF set to BYTE, as another firmware's
+ *                                image writes over it (no erase; OFF from the pool's start; 0x.. hex)
  *   wav FILE | wavstop           start / stop recording the output
  *   asid FILE                    keep the raw MIDI out stream (the ASID SysEx) in FILE
  *   shot FILE.png                save the screen
@@ -502,6 +505,18 @@ int main(int argc, char **argv)
             rc = song_put(buf, (uint32_t)got, 0, lens, nlen);
             if (rc) { printf("line %d: song_put %s: %d\n", lineno, a, rc); return 2; }
             songs_changed();
+        } else if (!strcmp(cmd, "songraw")) {
+            static uint8_t raw[ENG_FILE_MAX];
+            uint32_t n = (uint32_t)strtoul(a, 0, 0), i;
+            int rc;
+            for (i = 0; i < n && i < sizeof raw; i++) raw[i] = (uint8_t)(i * 7u + 1u);
+            rc = song_put(raw, n, 0, 0, 0);
+            if (rc) { printf("line %d: song_put %u bytes: %d\n", lineno, (unsigned)n, rc); return 2; }
+            songs_changed();
+        } else if (!strcmp(cmd, "poolwrite")) {
+            uint32_t off = (uint32_t)strtoul(a, 0, 0), n = (uint32_t)strtoul(b, 0, 0);
+            if (off + n > sizeof pool) { printf("line %d: poolwrite past the pool\n", lineno); return 2; }
+            memset(pool + off, (int)strtoul(c, 0, 0), n);
         } else if (!strcmp(cmd, "songdel")) {
             if (song_delete(atoi(a))) { printf("line %d: song_delete %s failed\n", lineno, a); return 2; }
             songs_changed();

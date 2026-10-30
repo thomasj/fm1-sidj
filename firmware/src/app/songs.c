@@ -137,7 +137,7 @@ static int song_delete(int k)                                 /* clear the live 
 static int song_put(const uint8_t *data, uint32_t size, const uint8_t *md5, const uint16_t *len, int nlen)
 {
     song_hdr_t h;
-    uint32_t off = song_end, need, i, lo;
+    uint32_t off = song_end, need, end, i, lo;
     uint8_t lens[SONG_MAX_LEN * 2 + 4];
     if (!size || size > ENG_FILE_MAX || nlen > SONG_MAX_LEN) return -1;
     for (i = 0; i < sizeof h; i++) ((uint8_t *)&h)[i] = 0;
@@ -146,13 +146,19 @@ static int song_put(const uint8_t *data, uint32_t size, const uint8_t *md5, cons
     h.crc = song_crc16(data, size);
     h.hcrc = song_hdr_crc(&h);
     need = song_entry_bytes(&h);
-    /* the space must be blank: the rest of the last sector may hold stale bytes (an older
-     * firmware's data), in which case the entry starts at the next sector, and the sectors it
-     * covers are erased when they are not blank (nothing live is beyond song_end) */
-    if (!song_blank(off, (off + need > SONG_POOL_END ? SONG_POOL_END : off + need) - off)) {
+    /* the space must be blank, and so must the next header's place after it, or the walk at boot
+     * would take stale bytes there for entries: another firmware's data, or SiDJ's own entries
+     * left beyond what the official firmware wrote over the pool's start. When it is not, the
+     * entry starts at the next sector unless the rest of this one is blank, and the sectors it and
+     * the next header's place cover are erased (nothing live is beyond song_end) */
+    end = off + need + SONG_HDR > SONG_POOL_END ? SONG_POOL_END : off + need + SONG_HDR;
+    if (!song_blank(off, end - off)) {
         uint32_t s = (off + SONG_SECTOR - 1u) / SONG_SECTOR * SONG_SECTOR;
-        if (s > off && !song_blank(off, s - off)) off = s;
-        for (s = off / SONG_SECTOR * SONG_SECTOR; s < off + need && s < SONG_POOL_END; s += SONG_SECTOR)
+        if (s > off && !song_blank(off, (end < s ? end : s) - off)) {
+            off = s;
+            end = off + need + SONG_HDR > SONG_POOL_END ? SONG_POOL_END : off + need + SONG_HDR;
+        }
+        for (s = off / SONG_SECTOR * SONG_SECTOR; s < end; s += SONG_SECTOR)
             if (s >= off && !song_blank(s, SONG_SECTOR) && song_erase_sector(s)) return -3;
     }
     if (off + need > SONG_POOL_END) return -2;

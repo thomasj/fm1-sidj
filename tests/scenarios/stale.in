@@ -1,0 +1,17 @@
+# the song store after the official firmware: V16's image writes over the pool's first 36 KB and
+# leaves SiDJ's entries beyond it. The walk at boot stops at the overwritten start (no songs), and
+# songs added then must not pick the old entries up again, not even when one ends exactly where an
+# old entry starts (the first here: 4064 bytes + its header fill one sector)
+songraw 4064
+songraw 1000
+songraw 1000
+expect songs 3
+poolwrite 0 0x800 0x5a
+reboot
+expect songs 0
+songraw 4064
+expect songs 1
+songraw 1000
+expect songs 2
+reboot
+expect songs 2
