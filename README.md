@@ -141,6 +141,9 @@ fader moves both, like a turntable. A new song or subsong starts at 100 % with t
 as the rest of the remix starts clean. RSID tunes, which drive the whole C64 themselves, play
 as written: no tempo, fader or LFOs.
 
+**MIDI.** A MIDI controller can play the whole remix too, with a CC for every control above.
+The map is in the addendum [SiDJ over MIDI](docs/midi.md).
+
 ## Outputs
 
 **The audio jack** plays the emulated SID; `MASTER` sets its level.
@@ -177,6 +180,12 @@ two failed starts give a safe mode (PLAY tries again), four give the chip's own 
 and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the chip's update mode,
 `tools/fm1_rescue.sh` puts the official firmware back, and Leo Kuroshita's
 [FM-1 Transporter](https://github.com/kurogedelic/FM-1-transporter) is the last resort.
+
+**Other firmwares' data.** SiDJ keeps its songs in the flash area where Felucca and the
+firmwares built on it keep their user samples (0xA0000 to 0xDBFFF). Adding songs erases what
+another firmware saved there, and other firmwares cannot read SiDJ's songs. SiDJ ignores
+anything in the area that is not a SiDJ song. Back up your samples and projects before you
+install SiDJ.
 
 ## Songs from the command line
 
@@ -264,7 +273,7 @@ Why reSID 0.16: [docs/engine-choice.md](docs/engine-choice.md).
 | `web/site/`, `web/emu/` | the web page (installer, song manager) and the browser emulator |
 | `tests/` | the host tests and the simulator's scenarios |
 | `tools/` | build, package, install, songs, site, release |
-| `docs/` | the design, the FM-1 platform ([docs/platform.md](docs/platform.md)), the engine choice |
+| `docs/` | MIDI control ([docs/midi.md](docs/midi.md)), the design, the FM-1 platform ([docs/platform.md](docs/platform.md)), the engine choice |
 | `third_party/` | reSID 0.16 unmodified, the 6502 functional test, licence texts |
 
 ## Licence

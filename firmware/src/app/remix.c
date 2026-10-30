@@ -153,8 +153,8 @@ uint8_t remix_derive(const remix_t *rx, uint8_t reg)
         case SID_ADDR_CTRL:
             if (x->wave_ovr && (t & RX_WAVE_TONAL))     /* the chosen waveform instead of the tune's (pure noise stays) */
                 t = (uint8_t)((t & ~SID_CTRL_WAVES) | (x->wave_val & SID_CTRL_WAVES));
-            if (x->sr_ovr)                              /* sync and ring, frozen */
-                t = (uint8_t)((t & ~(SID_CTRL_SYNC | SID_CTRL_RING)) | (x->sr_val & (SID_CTRL_SYNC | SID_CTRL_RING)));
+            if (x->sr_ovr)                              /* sync and ring, those frozen */
+                t = (uint8_t)((t & ~x->sr_ovr) | (x->sr_val & x->sr_ovr));
             if (x->mute) t &= (uint8_t)~SID_CTRL_WAVES;      /* no waveform: silence; gate, sync, ring kept */
             return t;
         case SID_ADDR_AD:
@@ -172,7 +172,7 @@ uint8_t remix_derive(const remix_t *rx, uint8_t reg)
             if (rx->v[v].filt_ovr) route = (route & ~(1 << v)) | ((rx->v[v].filt_val & 1) << v);
         return (uint8_t)((res << SID_FILT_RES_SHIFT) | (t & SID_FILT_EXT) | route);
     }
-    if (reg == SID_ADDR_MODE_VOL && rx->fmode_ovr) return (uint8_t)((t & ~SID_MODE_FILTERS) | (rx->fmode_val & SID_MODE_FILTERS));
+    if (reg == SID_ADDR_MODE_VOL && rx->fmode_ovr) return (uint8_t)((t & ~rx->fmode_ovr) | (rx->fmode_val & rx->fmode_ovr));
     return t;
 }
 

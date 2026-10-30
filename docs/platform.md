@@ -89,7 +89,10 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
 - Install over USB-MIDI SysEx (`tools/fm1_install.py`, `src/ota.c`): the running app stages
   the RAM-only loader (`firmware/loader/`) at 0xE0000, writes an update record, resets; the
   SPL runs the loader, which pulls the image from the host in 512 B reads and writes sectors
-  0x4000-0x93000, verifying each. The stock V15 package goes back the same way.
+  0x4000-0x93000, verifying each. M-VAVE's packages go back the same way with their own loader
+  (V15's and V16's are the same), which rewrites the whole flash image head included: V15's is
+  0x93000 bytes, V16's 0xA9000 (into the song store), and their heads differ, so `ota.c` takes a
+  head unlike the FM-1's only when it is one of those two (by CRC).
 - Safety nets: 2 failed boots → X0X's safe mode (USB and OTA only; Felucca goes straight to
   the chip's UBOOT), 4 failed boots → UBOOT, OCT- and OCT+ held together for 5 s → UBOOT, a
   crash screen with vector / PC for 4 s, then a reboot. UBOOT enumerates as USB 4C4A:8057

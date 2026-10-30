@@ -130,6 +130,12 @@ static uint32_t ota_body_off(void)                  /* ota.bin data + 0x20 in th
     return 0;
 }
 
+static int official_loader(void)                     /* the package carries M-VAVE's loader (V15, V16) */
+{
+    const uint8_t *b = logical + ota_body_off() - 0x20u;
+    return ota_rd16(b) == OTA_LDR_HCRC && ota_rd16(b + 2) == OTA_LDR_DCRC;
+}
+
 static int check(const char *what, int ok)
 {
     printf("%-52s %s\n", what, ok ? "ok" : "FAIL");
@@ -205,8 +211,12 @@ int main(int argc, char **argv)
     reset_dev();
     rc = ota_session();
     printf("  %u requests\n", requests);
-    bad += check("session commits (flash.bin exactly 0x93000)", rc == 0 && committed);
-    bad += check("headers + loader + confirm, no head reads", requests >= 10 && requests <= 30);
+    bad += check(official_loader() ? "session commits (official loader)" : "session commits (Felucca's loader)",
+                 rc == 0 && committed);
+    if (official_loader())                              /* + the head (32 reads) and the larger loader */
+        bad += check("headers + head + loader + confirm", requests >= 42 && requests <= 80);
+    else
+        bad += check("headers + loader + confirm, no head reads", requests >= 10 && requests <= 30);
     {
         uint8_t *h = nor + 0xE0000, *p = committed_parm;
         bad += check("staged body == the package's loader", !memcmp(nor + 0xE0020, logical + ota_body_off(), 64));
@@ -222,16 +232,40 @@ int main(int argc, char **argv)
     bad += check("boot cleanup erases the area", ota_boot_cleanup() == 1 && area_erased());
     bad += check("second boot: nothing to do", ota_boot_cleanup() == 0);
 
-    /* another board's package (flash.bin not this board's app area size): refused in step 1, nothing erased */
+    /* another board's package (flash.bin not this board's app area size): refused before anything is erased.
+     * The official loader writes the whole flash.bin, so it may be larger (V16: 0xA9000), up to the staging area */
     {
+        static const uint32_t sizes[] = {0x92000u, 0x93800u, 0x9D000u, 0xA9000u, 0xE0000u, 0xE1000u};
         uint8_t keep[0x40 + 11 * 0x50];
+        char what[80];
         memcpy(keep, logical, sizeof keep);
+        for (i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
+            uint32_t z = sizes[i];
+            int take = official_loader() && z >= 0x93000u && z <= 0xE0000u && !(z % 0x1000u);
+            reset_dev();
+            set_fl_size(logical, z);
+            rc = ota_session();
+            if (take) {
+                snprintf(what, sizeof what, "flash.bin 0x%X, official loader: commits", (unsigned)z);
+                bad += check(what, rc == 0 && committed);
+            } else {
+                snprintf(what, sizeof what, "flash.bin 0x%X: -15, no commit, no erase", (unsigned)z);
+                bad += check(what, rc == -15 && !committed && erases == 0 && area_erased());
+            }
+            memcpy(logical, keep, sizeof keep);
+        }
+    }
+
+    /* the official loader rewrites the head: one unlike this FM-1's only if it is M-VAVE's (a V15 FM-1 back to V16) */
+    if (official_loader()) {
         reset_dev();
-        set_fl_size(logical, 0x9D000u);
+        nor[0x200] ^= 0x01;                                /* the FM-1 has another head */
         rc = ota_session();
-        bad += check("another board's size (0x9D000): -15, no commit, no erase", rc == -15 && !committed && erases == 0 &&
-                     area_erased());
-        memcpy(logical, keep, sizeof keep);
+        bad += check("another head on the FM-1, M-VAVE's in the package: commits", rc == 0 && committed);
+        reset_dev();
+        corrupt_at = logical + 0x400 + 0x200;              /* the package's head is no known one */
+        rc = ota_session();
+        bad += check("an unknown head in the package: -5, no erase", rc == -5 && !committed && erases == 0);
     }
 
     /* host disappears in the middle */

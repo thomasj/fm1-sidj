@@ -221,8 +221,10 @@ static void rx_event(uint8_t p, uint8_t voice, int32_t val)
             if (x->wave_ovr && x->wave_val == (uint8_t)val) x->wave_ovr = 0;
             else { x->wave_ovr = 1; x->wave_val = (uint8_t)val; }
         } else {
-            if (!x->sr_ovr) { x->sr_ovr = 1; x->sr_val = (uint8_t)(rx.tune[SID_ADDR_VOICE(voice) + SID_ADDR_CTRL] & (SID_CTRL_SYNC | SID_CTRL_RING)); }
-            x->sr_val ^= (uint8_t)val;
+            uint8_t sr = SID_CTRL_SYNC | SID_CTRL_RING, t = rx.tune[SID_ADDR_VOICE(voice) + SID_ADDR_CTRL];
+            x->sr_val = (uint8_t)((x->sr_val & x->sr_ovr) | (t & sr & ~x->sr_ovr));   /* the free bits as the tune has them */
+            x->sr_ovr = sr;
+            x->sr_val ^= (uint8_t)(val & sr);
         }
         rx_push(voice);
         break;
@@ -243,7 +245,8 @@ static void rx_event(uint8_t p, uint8_t voice, int32_t val)
         rx_push(-1);
         break;
     case RX_P_FMODE_TOGGLE:
-        if (!rx.fmode_ovr) { rx.fmode_ovr = 1; rx.fmode_val = (uint8_t)(rx.tune[SID_ADDR_MODE_VOL] & SID_MODE_FILTERS); }
+        rx.fmode_val = (uint8_t)((rx.fmode_val & rx.fmode_ovr) | (rx.tune[SID_ADDR_MODE_VOL] & SID_MODE_FILTERS & ~rx.fmode_ovr));
+        rx.fmode_ovr = SID_MODE_FILTERS;
         rx.fmode_val ^= (uint8_t)(val & SID_MODE_FILTERS);
         rx_push(-1);
         break;
@@ -311,6 +314,69 @@ static void rx_event(uint8_t p, uint8_t voice, int32_t val)
         rx_push(-1);
         break;
     case RX_P_RES: rx.res_off = (int8_t)clampi(rx.res_off + val, -SID_NIBBLE_MAX, SID_NIBBLE_MAX); rx_push(-1); break;
+    default: break;
+    }
+}
+
+static void bit_set(uint8_t *ovr, uint8_t *v, uint8_t bit, int32_t val)   /* -1 the tune's, 0 off, 1 on */
+{
+    if (val < 0) { *ovr &= (uint8_t)~bit; return; }
+    *ovr |= bit;
+    *v = (uint8_t)(val ? *v | bit : *v & ~bit);
+}
+
+static void rx_set(uint8_t p, uint8_t voice, int32_t val)   /* EV_RX_SET: the value itself, as MIDI CCs send it */
+{
+    rx_voice_t *x = &rx.v[voice < RX_NV ? voice : 0];
+    int v;
+    switch (p) {
+    case RX_P_WAVE_TOGGLE:                  /* a waveform bit, 0 the tune's */
+        x->wave_ovr = (val & SID_CTRL_WAVES) != 0;
+        x->wave_val = (uint8_t)(val & SID_CTRL_WAVES);
+        rx_push(voice);
+        break;
+    case RX_P_SYNC: case RX_P_RING:
+        bit_set(&x->sr_ovr, &x->sr_val, p == RX_P_SYNC ? SID_CTRL_SYNC : SID_CTRL_RING, val);
+        rx_push(voice);
+        break;
+    case RX_P_MUTE_TOGGLE: x->mute = val != 0; rx_push(voice); break;
+    case RX_P_SOLO:                         /* 1: the voice alone; 0: all back */
+        for (v = 0; v < RX_NV; v++) rx.v[v].mute = (uint8_t)(val && v != (int)voice);
+        rx_push(-1);
+        break;
+    case RX_P_FILT_TOGGLE: x->filt_ovr = val >= 0; x->filt_val = val > 0; rx_push(-1); break;
+    case RX_P_FMODE_TOGGLE: bit_set(&rx.fmode_ovr, &rx.fmode_val, voice & SID_MODE_FILTERS, val); rx_push(-1); break;
+    case RX_P_PW:
+        x->pw_ovr = val >= 0;
+        if (val >= 0) x->pw_val = (uint16_t)clampi(val, 0, SID_PW_MAX);
+        rx_push(voice);
+        break;
+    case RX_P_OCT: x->oct = (int8_t)clampi(val, -RX_OCT_MAX, RX_OCT_MAX); rx_push(voice); break;
+    case RX_P_FINE: x->fine = (int8_t)clampi(val, -RX_FINE_MAX, RX_FINE_MAX); rx_push(voice); break;
+    case RX_P_A: case RX_P_D: case RX_P_S: case RX_P_R: {
+        uint8_t *f = p == RX_P_A ? &x->a : p == RX_P_D ? &x->d : p == RX_P_S ? &x->s : &x->r;
+        uint8_t bit = (uint8_t)(1u << (p - RX_P_A));
+        if (val < 0) x->adsr_ovr &= (uint8_t)~bit;
+        else { x->adsr_ovr |= bit; *f = (uint8_t)clampi(val, 0, SID_NIBBLE_MAX); }
+        rx_push(voice);
+        break;
+    }
+    case RX_P_LFO_RATE: case RX_P_LFO_DEPTH: case RX_P_LFO_TARGET: case RX_P_LFO_SHAPE:
+        if (eng_deck_off) break;            /* an RSID: no LFOs */
+        if (p == RX_P_LFO_RATE) x->lfo_rate = (uint8_t)clampi(val, 0, RX_LFO_NRATE - 1);
+        else if (p == RX_P_LFO_DEPTH) x->lfo_depth = (uint8_t)clampi(val, 0, RX_LFO_DEPTH_MAX);
+        else if (p == RX_P_LFO_TARGET) x->lfo_target = (uint8_t)clampi(val, 0, RX_LFO_NTARGET - 1);
+        else x->lfo_shape = (uint8_t)clampi(val, 0, RX_LFO_NSHAPE - 1);
+        break;
+    case RX_P_CUTOFF:
+        if (rx.cutoff_mode == RX_CUT_OFFSET) rx.cutoff_off = (int16_t)clampi(val, -SID_FC_MAX, SID_FC_MAX);
+        else rx.cutoff_scale = (uint16_t)clampi(val, 0, RX_CUTOFF_MAX);
+        rx_push(-1);
+        break;
+    case RX_P_RES: rx.res_off = (int8_t)clampi(val, -SID_NIBBLE_MAX, SID_NIBBLE_MAX); rx_push(-1); break;
+    case RX_P_TEMPO: rx_event(p, 0, val - eng_tempo); break;   /* as a step: the cap applies the same way */
+    case RX_P_VINYL: rx_event(p, 0, val - eng_vinyl); break;
+    case RX_P_CUTOFF_MODE: rx_event(p, 0, val); break;
     default: break;
     }
 }
@@ -432,6 +498,9 @@ static void eng_apply(const ev_t *e)
         break;
     case EV_RX:
         rx_event(e->a, e->b, (int32_t)e->pkt);
+        break;
+    case EV_RX_SET:
+        rx_set(e->a, e->b, (int32_t)e->pkt);
         break;
     case EV_RX_RESET:
         remix_reset(&rx);

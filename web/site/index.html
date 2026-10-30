@@ -208,7 +208,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
       <div class="feature" style="--c:var(--g)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12V6h3l5-4v14l-5-4H2z"/><path d="M13 6.5a3.5 3.5 0 010 5"/></svg></div>
         <h3>The whole of HVSC</h3><p>Tens of thousands of tunes: game classics, demo bangers, today's compo winners. Each plays on the 6581 or 8580 it was written for and stops where HVSC says it ends.</p></div>
       <div class="feature" style="--c:var(--r)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15V9M9 15V3M15 15v-5"/><circle cx="3" cy="7" r="1.6"/><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="8" r="1.6"/></svg></div>
-        <h3>Remix every voice</h3><p>Hold a key on the FM-1 or a MIDI keyboard and the voice follows, in time. Mute, solo, swap waveforms, bend envelopes and pulse width, push the cutoff up to 16×, give each voice its own LFO, and ride the tempo and a vinyl fader. Two buttons put it all back.</p></div>
+        <h3>Remix every voice</h3><p>Hold a key on the FM-1 or a MIDI keyboard and the voice follows, in time. Mute, solo, swap waveforms, bend envelopes and pulse width, push the cutoff up to 16×, give each voice its own LFO, and ride the tempo and a vinyl fader, from the panel or a controller's CCs. Two buttons put it all back.</p></div>
       <div class="feature" style="--c:var(--b)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="12" height="10" rx="1.5"/><path d="M6 1v3M9 1v3M12 1v3M6 14v3M9 14v3M12 14v3"/></svg></div>
         <h3>Real SID, USB audio</h3><p>Drive a SidStation, TherapSID, TeensyROM or USBSID-Pico over ASID, remix included, alone or alongside the emulation. Over the same cable the FM-1 is a driverless audio interface: the mix, or each voice on its own channel, straight into your DAW.</p></div>
       <div class="feature" style="--c:var(--w)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="14" height="10" rx="1.5"/><path d="M6 16h6M9 13v3"/></svg></div>
@@ -258,7 +258,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
           <p class="status" id="status"></p>
           <details><summary>Details</summary><pre class="log" id="log"></pre></details>
         </div>
-        <p class="small">The installer works from M-VAVE's own firmware, from Felucca, from X0X and from other open firmwares built on Felucca's
+        <p class="small">The installer works from M-VAVE's own firmware (V16 or V15), from Felucca, from X0X and from other open firmwares built on Felucca's
           updater. If a write is interrupted, the FM-1 stays in update mode: reconnect it and press Install again. If the FM-1 no longer
           starts, it falls back by itself. Two failed starts give a safe mode where PLAY tries again, and four give the chip's own update
           mode, which OCT− and OCT+ held for 5 seconds also reach. From there, the README's <span class="mono">tools/fm1_rescue.sh</span> or
@@ -267,8 +267,8 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
         <details>
           <summary>Go back to the official firmware</summary>
           <div class="card sub">
-            <p class="small">Download the official FM-1 V15 from <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a> and
-              choose the unmodified FM-1.fwsc. The browser checks it here and sends it nowhere else. The songs on the FM-1 are not kept,
+            <p class="small">Download the official FM-1 firmware (V16) from <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a> and
+              choose the unmodified FM-1.fwsc. An FM-1.fwsc of V15 you already have works too. The browser checks it here and sends it nowhere else. The songs on the FM-1 are not kept,
               because the official firmware can't read them.</p>
             <div class="row"><label class="btn sm">Choose FM-1.fwsc<input id="stockfile" type="file" accept=".fwsc"></label>
               <button class="btn sm" id="stockgo" disabled>Install the official firmware</button></div>
@@ -370,6 +370,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
             <div class="cheat"><span class="keys"><kbd>FX</kbd><i>&amp;</i><kbd>OCT−</kbd></span><span>the keys transpose the tune</span></div>
             <div class="cheat"><span class="keys"><kbd>FX</kbd><i>&amp;</i><kbd>OCT+</kbd></span><span>the keys set the pitch</span></div>
             <div class="cheat"><span class="keys"><em>MIDI keyboard</em></span><span>plays as the keys, over USB or MIDI IN: channels 1–3 a voice each, others the selected one</span></div>
+            <div class="cheat"><span class="keys"><em>MIDI CCs</em></span><span>the whole remix from a controller: CC 70, 72, 73 and 75–88 a voice (by channel, as the keys), 71, 74 and 102–108 the filter and the deck (the table is in <a href="https://github.com/thomasj/fm1-sidj/blob/main/docs/midi.md">SiDJ over MIDI</a>)</span></div>
             <div class="cheat"><span class="keys"><kbd>REC</kbd></span><span>mute or unmute the voice</span></div>
             <div class="cheat"><span class="keys"><em>voice</em><i>&amp;</i><kbd>REC</kbd></span><span>solo the voice</span></div>
           </div>
@@ -499,7 +500,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
 })();
 </script>
 <script type="module">
-import { productOf, logicalImage, validateStockPackage, STOCK_V15_SIZE } from "./fm1pkg.js";
+import { productOf, logicalImage, validateStockPackage, STOCK } from "./fm1pkg.js";
 import { Updater } from "./fm1ota.js";
 import { findFM1, midiInputs, parseSonglengths, md5, hex, sidInfo, fmtLen, FILE_MAX, openHvsc, readHvsc, searchHvsc, prettyPath,
          rememberFolder, recallFolder, folderAccess, starterTunes, addMissing } from "./fm1songs.js";
@@ -602,9 +603,9 @@ $("stockfile").addEventListener("change", async () => {
   stock = null; lock(false);
   if (!f) return;
   try {
-    if (f.size !== STOCK_V15_SIZE) throw new Error("this is not the official FM-1 V15 file (FM-1.fwsc)");
+    if (!STOCK.some((x) => x.size === f.size)) throw new Error("this is not the official FM-1 V16 or V15 file (FM-1.fwsc)");
     stock = await validateStockPackage(new Uint8Array(await f.arrayBuffer()));
-    say("status", "The official FM-1 V15 is checked and ready.");
+    say("status", `The official FM-1 ${stock.version} is checked and ready.`);
   } catch (e) { say("status", e.message, true); }
   lock(false);
 });

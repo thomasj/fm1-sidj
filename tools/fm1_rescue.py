@@ -12,18 +12,18 @@ takes it away from macOS (hence sudo) and keeps it.
   sudo ~/fm1-rescue/bin/python fm1_rescue.py FM-1.fwsc            # check and back up, write nothing
   sudo ~/fm1-rescue/bin/python fm1_rescue.py FM-1.fwsc --write    # then write stock
 
-FM-1.fwsc is M-VAVE's FM-1 V15 (m-vave.com/download, PC Firmware); only that exact file is
-accepted. The protocol and the write policy are FM-1-transporter's (github.com/kurogedelic/
+FM-1.fwsc is M-VAVE's FM-1 V16 or V15 (m-vave.com/download, PC Firmware); only those exact
+files are accepted. The protocol and the write policy are FM-1-transporter's (github.com/kurogedelic/
 FM-1-transporter, docs/PROTOCOL.md), which were verified on hardware:
 
   1. JieLi's flash loader (wl82loader.bin, from github.com/kagaimiq/jl-uboot-tool, downloaded
      and checked against its hash) is loaded into RAM and started;
   2. the chip key must be 980F and the flash 856014 (1 MiB), or nothing is done;
   3. the whole flash is read and saved as a backup before anything else;
-  4. only 4 KiB sectors in [0x4000, 0x93000) that differ from V15 are written (the bootloader below
-     0x4000 and the device data above 0x93000 are never touched; a difference below 0x4000 stops
-     it), each erased, written and read back;
-  5. a final full read must equal the expected image; then the FM-1 restarts into V15.
+  4. only 4 KiB sectors in [0x4000, the package's end) that differ from it are written (V15 ends at
+     0x93000, V16 at 0xA9000; the bootloader below 0x4000 and the device data above the end are
+     never touched; a difference below 0x4000 stops it), each erased, written and read back;
+  5. a final full read must equal the expected image; then the FM-1 restarts into it.
 """
 import argparse
 import hashlib
@@ -34,14 +34,17 @@ import time
 import urllib.request
 
 VID, PID = 0x4C4A, 0x8057
-STOCK_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a"
+STOCK = {                  # sha256 -> (version, the flash entry's size: raw flash [0, size))
+    "d017fb65e70aca97ee29d944470c3515a74581df5c0576bf70de917c7b2b61d5": ("V16", 0xA9000),
+    "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a": ("V15", 0x93000),
+}
 LOADER_URL = ("https://raw.githubusercontent.com/kagaimiq/jl-uboot-tool/"
               "c32b28e7a04f873f526ba929cb1bae9f05442fe9/data/loaderblobs/usb/wl82loader.bin")
 LOADER_SHA256 = "d41da6126760c9d66660bcc0cac8d27d221806c5e369a8036921efe68dca5376"
 LOADER_ADDR, LOADER_ARG = 0x1C02000, 0x0001
 
 FLASH_SIZE = 0x100000
-APP_END = 0x93000          # the .fwsc flash entry is raw flash [0, APP_END)
+APP_END = 0xA9000          # the largest package's end (V16); each writes only [WRITE_MIN, its own end)
 WRITE_MIN = 0x4000         # flash header, SPL, isd_config: never written
 SECTOR = 0x1000
 IO = 512
@@ -88,7 +91,7 @@ def enc(buf, key=0xFFFF):
 
 # ---------------------------------------------------------------- package ---
 def package_flash_image(raw):
-    """The .fwsc's type-0 entry: raw flash [0, APP_END). Layout as tools/fm1pkg_make.py writes it:
+    """The .fwsc's type-0 entry: raw flash [0, its size). Layout as tools/fm1pkg_make.py writes it:
     the logical image is the .fwsc without the marker byte after each of its first 20 0x2F-byte
     blocks; it starts with a 0x40-byte header and a list of 0x50-byte entries, each ENC'd."""
     logical = bytearray()
@@ -233,8 +236,9 @@ class Uboot:
 
 
 # ------------------------------------------------------------------- flow ---
-def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None):
+def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, name="V15"):
     """Everything in one session: the FM-1 leaves UBOOT (and crashes again) as soon as it is let go."""
+    end = len(image)
     vendor, product = dev.inquiry()
     say(f"  device: {vendor} {product}")
     if vendor != "WL82":
@@ -251,16 +255,16 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None):
     with open(path, "wb") as f:
         f.write(now)
     say(f"  backup saved: {path} ({time.time() - t0:.1f} s)")
-    diff = [a for a in range(0, APP_END, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
+    diff = [a for a in range(0, end, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
     low = [a for a in diff if a < WRITE_MIN]
     if low:
-        raise Fail("the protected head of the flash differs from V15 (sectors "
+        raise Fail(f"the protected head of the flash differs from {name} (sectors "
                    + " ".join(f"{a:#06x}" for a in low) + "): not writing; send this output and the backup")
-    say(f"  {len(diff)} of {APP_END // SECTOR} firmware sectors differ from V15")
+    say(f"  {len(diff)} of {end // SECTOR} firmware sectors differ from {name}")
     if not write and confirm is not None:
         write = keep_alive(dev, confirm)
     if not write:
-        say("  check passed. Nothing written: run again with --write to put V15 back.")
+        say(f"  check passed. Nothing written: run again with --write to put {name} back.")
         return False
     # high to low: X0X's start-up code (low in the app area: its watchdog and its crash counter,
     # which bring it back to update mode) is the last thing replaced if the write is cut short
@@ -275,13 +279,13 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None):
         say(f"\r  writing {i + 1}/{len(diff)}", end="")
     say("")
     say("  final read ...")
-    expect = image + now[APP_END:]
+    expect = image + now[end:]
     final = dev.read(0, FLASH_SIZE)
     if final != expect:
         bad = [a for a in range(0, FLASH_SIZE, SECTOR) if final[a:a + SECTOR] != expect[a:a + SECTOR]]
         raise Fail("final read differs in sectors " + " ".join(f"{a:#07x}" for a in bad)
                    + "; run the script again with --write")
-    say("  flash now holds V15. Restarting the FM-1 ...")
+    say(f"  flash now holds {name}. Restarting the FM-1 ...")
     dev.run_app()
     return True
 
@@ -380,8 +384,8 @@ def ask():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("package", help="M-VAVE's FM-1 V15 .fwsc")
-    ap.add_argument("--write", action="store_true", help="write V15 (without it: check and back up only)")
+    ap.add_argument("package", help="M-VAVE's FM-1 V16 or V15 .fwsc")
+    ap.add_argument("--write", action="store_true", help="write it (without it: check and back up only)")
     ap.add_argument("--ask", action="store_true", help="after the check and the backup, ask before writing")
     ap.add_argument("--loader", help="a local wl82loader.bin instead of downloading it")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for the FM-1 (default 120)")
@@ -389,10 +393,12 @@ def main():
     args = ap.parse_args()
     try:
         raw = open(args.package, "rb").read()
-        if hashlib.sha256(raw).hexdigest() != STOCK_SHA256:
-            raise Fail(f"{args.package} is not M-VAVE's FM-1 V15 package (sha256 mismatch)")
+        stock = STOCK.get(hashlib.sha256(raw).hexdigest())
+        if not stock:
+            raise Fail(f"{args.package} is not M-VAVE's FM-1 V16 or V15 package (sha256 mismatch)")
+        name, size = stock
         image = package_flash_image(raw)
-        if len(image) != APP_END:
+        if len(image) != size:
             raise Fail("unexpected flash entry size")
         loader = get_loader(args.loader)
         if os.geteuid() != 0:
@@ -408,7 +414,7 @@ def main():
             try:
                 rescue(Uboot(bot), image, loader, args.write, backup_dir,
                        say=lambda *a, **k: print(*a, **k, flush=True),
-                       confirm=ask if args.ask else None)
+                       confirm=ask if args.ask else None, name=name)
                 return 0
             except (Fail, usb.core.USBError) as e:
                 print(f"\n  attempt {attempt}: {e}")

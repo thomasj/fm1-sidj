@@ -70,7 +70,7 @@ int main(void)
     n = remix_refresh(&rx, 0, o, 32); CHECK(n == 1 && o[0].reg == 4 && o[0].val == 0x81);
     n = remix_write(&rx, 0x04, 0x40, o); CHECK(n == 1 && o[0].val == 0x80);   /* gate off from the tune, waveform from the override */
     /* sync and ring toggle on their own, frozen: ring on over the tune's sync-less pulse; the waveform still replaced */
-    rx.v[0].sr_ovr = 1; rx.v[0].sr_val = SID_CTRL_RING;
+    rx.v[0].sr_ovr = SID_CTRL_SYNC | SID_CTRL_RING; rx.v[0].sr_val = SID_CTRL_RING;
     n = remix_write(&rx, 0x04, 0x43, o); CHECK(n == 1 && o[0].val == 0x85);   /* the tune's sync gone, ring on, noise, gate */
     rx.v[0].wave_ovr = 0;
     n = remix_write(&rx, 0x04, 0x41, o); CHECK(n == 1 && o[0].val == 0x45);   /* the waveform the tune's again, ring still frozen */
@@ -150,7 +150,7 @@ int main(void)
     rx.v[1].filt_ovr = 0; rx.v[2].filt_ovr = 0;
     /* filter type: LP + HP frozen over the tune's BP; volume and voice 3 off follow the tune */
     remix_write(&rx, 0x18, 0xaf, o);                                    /* 3OFF, BP, volume 15 */
-    rx.fmode_ovr = 1; rx.fmode_val = 0x50;
+    rx.fmode_ovr = SID_MODE_FILTERS; rx.fmode_val = 0x50;
     CHECK(remix_derive(&rx, 0x18) == 0xdf);
     n = remix_write(&rx, 0x18, 0x24, o); CHECK(n == 1 && o[0].val == 0x54);
     rx.fmode_ovr = 0;

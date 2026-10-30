@@ -27,10 +27,12 @@
  *   expect WHAT VALUE            mode, playing, loaded, cur, sel, subsong, nsongs, voice, page, octave,
  *                                frames, elapsed, songs, fault, cutoff, regN, tuneN, peak_db_min/max;
  *                                per voice V (0..2): muteV, keyonV, waveV, pwovrV, freqV, ctrlV,
+ *                                pwvalV, octV, adsrV, wovrV, srovrV, srvalV, filtovrV (-1: the tune's),
  *                                tunefreqV, shiftV, fineV, lfotargetV, lfodepthV, lforateV, lfoshapeV,
  *                                lfopwV, lfocentsV, lfoabsV; lfocut, lfocutabs, tempo, vinyl, dframes
  *                                and dscope (the frames, the scopes' samples since `mark`); the remix: keymode, cutmode, scale, cutoff_off,
- *                                route, tuneroute, routexor, fmode, tunefmode, fmodexor; the output:
+ *                                route, tuneroute, routexor, fmode, tunefmode, fmodexor, fmodeovr,
+ *                                fmodeval, res; the output:
  *                                output, asid_msgs, asid_starts, asid_stops, asid_types, asid_bad,
  *                                asid_double, asid_vol_at_stop, asid_diffC, asid_seenC (chip C)
  *                                (VALUE may be <N or >N); exit 1 on a mismatch
@@ -426,6 +428,16 @@ static int expect(const char *what, const char *val)
     }
     else if (!strncmp(what, "wave", 4) && v >= 0 && v < 3) have = rx.out[SID_ADDR_VOICE(v) + SID_ADDR_CTRL] & RX_WAVE_MASK;
     else if (!strncmp(what, "pwovr", 5) && v >= 0 && v < 3) have = rx.v[v].pw_ovr;
+    else if (!strncmp(what, "pwval", 5) && v >= 0 && v < 3) have = rx.v[v].pw_ovr ? rx.v[v].pw_val : -1;
+    else if (!strncmp(what, "oct", 3) && v >= 0 && v < 3) have = rx.v[v].oct;
+    else if (!strncmp(what, "adsr", 4) && v >= 0 && v < 3) have = rx.v[v].adsr_ovr;
+    else if (!strncmp(what, "wovr", 4) && v >= 0 && v < 3) have = rx.v[v].wave_ovr ? rx.v[v].wave_val : 0;
+    else if (!strncmp(what, "srovr", 5) && v >= 0 && v < 3) have = rx.v[v].sr_ovr;
+    else if (!strncmp(what, "srval", 5) && v >= 0 && v < 3) have = rx.v[v].sr_val & rx.v[v].sr_ovr;
+    else if (!strncmp(what, "filtovr", 7) && v >= 0 && v < 3) have = rx.v[v].filt_ovr ? rx.v[v].filt_val : -1;
+    else if (!strcmp(what, "fmodeovr")) have = rx.fmode_ovr;
+    else if (!strcmp(what, "fmodeval")) have = rx.fmode_val & rx.fmode_ovr;
+    else if (!strcmp(what, "res")) have = rx.res_off;
     else if (!strncmp(what, "freq", 4) && v >= 0 && v < 3) have = sid_freq(rx.out, v);
     else if (!strncmp(what, "ctrl", 4) && v >= 0 && v < 3) have = rx.out[SID_ADDR_VOICE(v) + SID_ADDR_CTRL];
     else if (!strcmp(what, "peak_db_min") || !strcmp(what, "peak_db_max")) have = peak_out > 0 ? (long)floor(20.0 * log10((double)peak_out)) : -200;

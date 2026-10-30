@@ -1,10 +1,12 @@
 #!/bin/bash
 # FM-1 rescue: one command that puts M-VAVE's stock firmware back on an FM-1 stuck in a crash loop.
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/charlesvestal/fm1-x0x/main/tools/fm1_rescue.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/thomasj/fm1-sidj/main/tools/fm1_rescue.sh)"
+# (X0X's, by way of github.com/charlesvestal/fm1-x0x; this copy also takes M-VAVE's V16)
 set -e
 DIR="$HOME/fm1-rescue"
-RAW="https://raw.githubusercontent.com/charlesvestal/fm1-x0x/main/tools"
-STOCK=db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a
+RAW="https://raw.githubusercontent.com/thomasj/fm1-sidj/main/tools"
+STOCK="d017fb65e70aca97ee29d944470c3515a74581df5c0576bf70de917c7b2b61d5 db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a"
+stock() { case " $STOCK " in *" $(shasum -a 256 "$1" | cut -d' ' -f1) "*) return 0;; esac; return 1; }
 echo
 echo "=== FM-1 rescue ==="
 if ! xcode-select -p >/dev/null 2>&1; then
@@ -25,13 +27,13 @@ curl -fsSL -o fm1_rescue.py "$RAW/fm1_rescue.py"
 PKG=""
 for f in "$DIR"/*.fwsc "$HOME"/Downloads/*.fwsc "$HOME"/Desktop/*.fwsc; do
     [ -f "$f" ] || continue
-    if [ "$(shasum -a 256 "$f" | cut -d' ' -f1)" = "$STOCK" ]; then PKG="$f"; break; fi
+    if stock "$f"; then PKG="$f"; break; fi
 done
 if [ -z "$PKG" ]; then
-    echo "Downloading the stock firmware (M-VAVE's FM-1 V15) ..."
+    echo "Downloading the stock firmware (M-VAVE's FM-1) ..."
     curl -fsSL -o "$DIR/FM-1.download" "https://yms-file-store.oss-cn-hongkong.aliyuncs.com/software/firmware/FM-1.fwsc"
-    if [ "$(shasum -a 256 "$DIR/FM-1.download" | cut -d' ' -f1)" != "$STOCK" ]; then
-        echo "The downloaded file is not the expected V15 firmware. Nothing was done; send this output."
+    if ! stock "$DIR/FM-1.download"; then
+        echo "The downloaded file is not a known official firmware (V16 or V15). Nothing was done; send this output."
         exit 1
     fi
     mv "$DIR/FM-1.download" "$DIR/FM-1.fwsc"

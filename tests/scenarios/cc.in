@@ -1,0 +1,227 @@
+# the remix over MIDI CCs: a voice's CC on channels 1, 2, 3 sets that voice, on another
+# channel the selected one; the global ones take any channel. Where the tune has a value of
+# its own, an end or a zone of the range gives it back
+sid @SID1@
+tap PLAY
+wait 500
+expect playing 1
+# pulse width (70): 127 the top, 64 the middle, 0 the tune's own
+midi B0 46 7F
+wait 50
+expect pwval0 4095
+expect reg0x03 15
+midi B0 46 00
+wait 50
+expect pwval0 -1
+midi B1 46 40
+wait 50
+expect pwval1 2048
+# channel 10: the selected voice (voice 3)
+tap ARP
+midi B9 46 01
+wait 50
+expect pwval2 0
+expect pwval0 -1
+tap HOME
+# attack (73) and decay (75): 1 .. 127 is 0 .. 15, 0 the tune's
+midi B0 49 7F
+midi B0 4B 01
+wait 50
+expect reg0x05 240
+expect adsr0 3
+midi B0 49 00
+wait 50
+expect adsr0 2
+# sustain (76) and release (72)
+midi B0 4C 7F
+midi B0 48 01
+wait 50
+expect reg0x06 240
+expect adsr0 14
+midi B0 4B 00
+midi B0 4C 00
+midi B0 48 00
+wait 50
+expect adsr0 0
+# octave (77): seven zones, 64 is 0
+midi B0 4D 7F
+wait 50
+expect oct0 3
+midi B0 4D 00
+wait 50
+expect oct0 -3
+midi B0 4D 40
+wait 50
+expect oct0 0
+# fine (78): 64 is 0, the ends +-50 cents
+midi B0 4E 7F
+wait 50
+expect fine0 50
+midi B0 4E 00
+wait 50
+expect fine0 -50
+midi B0 4E 40
+wait 50
+expect fine0 0
+# the waveform (79): the tune's, pulse, triangle, saw, noise
+midi B0 4F 7F
+wait 50
+expect wovr0 128
+midi B0 4F 33
+wait 50
+expect wovr0 64
+midi B0 4F 4D
+wait 50
+expect wovr0 32
+midi B0 4F 00
+wait 50
+expect wovr0 0
+# sync (80) and ring (81), one bit each: the tune's, off, on
+midi B0 50 7F
+wait 50
+expect srovr0 2
+expect srval0 2
+midi B0 51 40
+wait 50
+expect srovr0 6
+expect srval0 2
+midi B0 50 00
+wait 50
+expect srovr0 4
+midi B0 51 00
+wait 50
+expect srovr0 0
+# mute (82) and solo (83)
+midi B1 52 7F
+wait 50
+expect mute1 1
+midi B1 52 00
+wait 50
+expect mute1 0
+midi B2 53 7F
+wait 50
+expect mute0 1
+expect mute1 1
+expect mute2 0
+midi B2 53 00
+wait 50
+expect mute0 0
+expect mute1 0
+expect mute2 0
+# through the filter (84): the tune's, no, yes
+midi B0 54 7F
+wait 50
+expect filtovr0 1
+midi B0 54 40
+wait 50
+expect filtovr0 0
+midi B0 54 00
+wait 50
+expect filtovr0 -1
+# the LFO: rate (85), depth (86), target (87), shape (88)
+midi B0 55 7F
+midi B0 56 7F
+midi B0 57 7F
+midi B0 58 7F
+wait 50
+expect lforate0 63
+expect lfodepth0 100
+expect lfotarget0 3
+expect lfoshape0 4
+midi B0 57 00
+midi B0 56 00
+wait 50
+expect lfotarget0 0
+expect lfodepth0 0
+# the cutoff (74, any channel): scale 64 the tune's, x2 every 16 steps
+midi B5 4A 7F
+wait 50
+expect scale 1960
+midi B5 4A 00
+wait 50
+expect scale 8
+midi B5 4A 40
+wait 50
+expect scale 128
+# the cutoff mode (102): offset; 64 is 0, the ends +-2047
+midi B0 66 7F
+wait 50
+expect cutmode 1
+midi B0 4A 7F
+wait 50
+expect cutoff_off 2047
+midi B0 4A 00
+wait 50
+expect cutoff_off -2047
+midi B0 4A 40
+midi B0 66 00
+wait 50
+expect cutoff_off 0
+expect cutmode 0
+# resonance (71): 64 the tune's, +-15
+midi B0 47 7F
+wait 50
+expect res 15
+midi B0 47 00
+wait 50
+expect res -15
+midi B0 47 40
+wait 50
+expect res 0
+# the filter mode (103 LP, 104 BP, 105 HP): one bit each, the others follow the tune
+midi B0 67 7F
+wait 50
+expect fmodeovr 16
+expect fmodeval 16
+midi B0 68 40
+wait 50
+expect fmodeovr 48
+expect fmodeval 16
+midi B0 67 00
+midi B0 68 00
+wait 50
+expect fmodeovr 0
+# tempo (106): 0 is 25 %, 64 100 %, 127 150 %
+midi B0 6A 7F
+wait 50
+expect tempo 150
+midi B0 6A 00
+wait 50
+expect tempo 25
+midi B0 6A 40
+wait 50
+expect tempo 100
+# the vinyl fader (107): 64 is 0, the ends +-8 %
+midi B0 6B 7F
+wait 50
+expect vinyl 80
+midi B0 6B 00
+wait 50
+expect vinyl -80
+midi B0 6B 40
+wait 50
+expect vinyl 0
+# back to the tune (108): everything, as OCT- and OCT+ together
+midi B0 4D 7F
+midi B0 46 7F
+wait 50
+expect oct0 3
+midi B0 6C 7F
+wait 50
+expect oct0 0
+expect pwval0 -1
+# a fast sweep: the last value counts
+midi B0 4E 10
+midi B0 4E 20
+midi B0 4E 30
+midi B0 4E 7F
+wait 50
+expect fine0 50
+midi B0 4E 40
+wait 50
+# on the song list CCs change nothing
+tap SEQ
+expect mode 0
+midi B0 4D 7F
+wait 50
+expect oct0 0

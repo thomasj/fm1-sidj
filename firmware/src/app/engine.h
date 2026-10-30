@@ -24,11 +24,15 @@
                                              * low note (~45 Hz) and one more to find the trigger in */
 #define ENG_RATE 44100u
 
-enum { EV_LOAD, EV_PLAY, EV_STOP, EV_MODEL, EV_RX, EV_RX_RESET, EV_VOLUME, EV_OUTPUT, EV_USB4 };
+enum { EV_LOAD, EV_PLAY, EV_STOP, EV_MODEL, EV_RX, EV_RX_RESET, EV_VOLUME, EV_OUTPUT, EV_USB4, EV_RX_SET };
 /* EV_USB4: a = 1 USB audio offers four channels (the tempo and fader then share a 100 % cap), 0 the mix */
 /* EV_OUTPUT: a = 0 the emulated SID, 1 ASID over USB-MIDI (the emulation runs for the screen,
  * silent), 2 both */
 /* EV_RX: a = parameter, b = voice, pkt = value (signed deltas as int32) */
+/* EV_RX_SET: the same, pkt the value itself (MIDI CCs). -1 is the tune's own for pulse width, A, D,
+ * S, R, sync, ring, the filter routing and the filter mode; otherwise 0 off, 1 on. The waveform:
+ * a SID_CTRL_* waveform bit, 0 the tune's. RX_P_FMODE_TOGGLE: b the LP / BP / HP bit. The cutoff:
+ * the scale or the offset, whichever mode is on. RX_P_SOLO: 1 the voice alone, 0 all back */
 enum { RX_P_KEY, RX_P_WAVE_TOGGLE, RX_P_MUTE_TOGGLE, RX_P_PW, RX_P_OCT, RX_P_FINE,
        RX_P_A, RX_P_D, RX_P_S, RX_P_R, RX_P_CUTOFF, RX_P_RES,
        RX_P_SOLO,                           /* the voice alone; again: all voices back */
@@ -38,7 +42,8 @@ enum { RX_P_KEY, RX_P_WAVE_TOGGLE, RX_P_MUTE_TOGGLE, RX_P_PW, RX_P_OCT, RX_P_FIN
        RX_P_CUTOFF_MODE,                    /* pkt: RX_CUT_SCALE / RX_CUT_OFFSET (kept across songs) */
        RX_P_LFO_RATE, RX_P_LFO_DEPTH, RX_P_LFO_TARGET, RX_P_LFO_SHAPE,   /* voice b's LFO, pkt a delta */
        RX_P_TEMPO,                          /* pkt: a delta in %, 50 .. 200 */
-       RX_P_VINYL };                        /* pkt: a delta in 0.1 %, -80 .. 80 */
+       RX_P_VINYL,                          /* pkt: a delta in 0.1 %, -80 .. 80 */
+       RX_P_SYNC, RX_P_RING };              /* EV_RX_SET only */
 #define ENG_TEMPO_MIN 25
 #define ENG_TEMPO_MAX 150                  /* 200 % overloaded heavy tunes on the FM-1 (measured) */
 #define ENG_VINYL_MAX 80

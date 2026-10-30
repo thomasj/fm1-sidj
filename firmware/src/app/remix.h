@@ -41,7 +41,8 @@ extern const uint16_t RX_LFO_CHZ[RX_LFO_NRATE];   /* the rates in 0.01 Hz, for t
 
 typedef struct {
     uint8_t wave_ovr, wave_val;             /* the waveform replaced by wave_val (one of pulse, saw, triangle, noise) */
-    uint8_t sr_ovr, sr_val;                 /* the sync / ring bits frozen at sr_val (toggled one at a time) */
+    uint8_t sr_ovr, sr_val;                 /* the sync / ring bits in sr_ovr frozen at sr_val's (the panel
+                                             * freezes both, a MIDI CC one) */
     uint8_t mute;
     uint8_t pw_ovr; uint16_t pw_val;        /* 12-bit pulse width */
     uint8_t adsr_ovr;                       /* RX_ADSR_* bits: which nibbles are overridden */
@@ -62,7 +63,8 @@ typedef struct {
     uint16_t cutoff_scale;                  /* Q7 factor on the tune's cutoff, 0 .. RX_CUTOFF_MAX */
     int16_t cutoff_off;                     /* -2047 .. 2047 */
     int8_t res_off;                         /* -15 .. 15 */
-    uint8_t fmode_ovr, fmode_val;           /* the LP / BP / HP field frozen at fmode_val (SID_MODE_FILTERS bits) */
+    uint8_t fmode_ovr, fmode_val;           /* the LP / BP / HP bits in fmode_ovr frozen at fmode_val's (the
+                                             * panel freezes all three, a MIDI CC one) */
     uint8_t tune[SID_NREG];                 /* the image as the tune wrote it */
     uint8_t out[SID_NREG];                  /* the image as it reached the chip */
     uint8_t out_valid[SID_NREG];            /* out[] has been written at least once */

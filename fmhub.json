@@ -1,0 +1,9 @@
+{
+  "what": "Plays C64 SID music from HVSC on an emulated 6581 or 8580 and lets you remix every voice live: transpose from the keys, mute, solo, swap waveforms, bend envelopes and the filter, add LFOs, ride the tempo and a vinyl fader. Out of the jack, as USB audio, or over ASID to a real SID.",
+  "kinds": ["other"],
+  "play": "https://thomasj.github.io/fm1-sidj/emu/",
+  "editor": "https://thomasj.github.io/fm1-sidj/#songs",
+  "author": "thomasj (tubesockor)",
+  "cheat": "https://thomasj.github.io/fm1-sidj/#play",
+  "image": "web/site/img/remix.png"
+}

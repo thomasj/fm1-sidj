@@ -314,6 +314,84 @@ static void note_off(int l, int n)         /* n < 0: all the source's notes */
 enum { MIDI_NOTE_OFF = 0x80, MIDI_NOTE_ON = 0x90, MIDI_CC = 0xb0,   /* status, the channel in the low nibble */
        MIDI_CC_ALL_SOUND_OFF = 120, MIDI_CC_ALL_NOTES_OFF = 123 };
 
+static void ui_rx_reset(void);
+static void ui_set_cut_mode(int m);
+
+/* The remix over MIDI CCs, on the player as the keys. A voice's CC on channel 1, 2 or 3 sets that
+ * voice, on another channel the selected one; the global ones take any channel. 71 .. 75 are the
+ * standard sound controllers; 91 .. 95 (reverb, chorus: sent by many keyboards) stay clear. Where
+ * the tune has a value of its own, an end or a zone of the range gives it back. */
+enum { CC_PW, CC_A, CC_D, CC_S, CC_R, CC_OCT, CC_FINE, CC_WAVE, CC_SYNC, CC_RING, CC_MUTE, CC_SOLO,
+       CC_FILT, CC_LFO_RATE, CC_LFO_DEPTH, CC_LFO_TARGET, CC_LFO_SHAPE, CC_NVOICE,   /* (the voice's) */
+       CC_CUT_MODE = CC_NVOICE, CC_CUTOFF, CC_RES, CC_LP, CC_BP, CC_HP, CC_TEMPO, CC_VINYL, CC_RESET, NCC };
+static const uint8_t CC_NUM[NCC] = { 70, 73, 75, 76, 72, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88,
+                                     102, 74, 71, 103, 104, 105, 106, 107, 108 };   /* (the mode before the cutoff) */
+static const uint16_t CUT_EXP[16] = { 256, 267, 279, 292, 304, 318, 332, 347, 362, 378, 395, 412, 431, 450, 470, 490 };   /* 2^(i/16), Q8 */
+static uint8_t cc_pend[NCC][3];            /* the latest value + 1 of each not yet with the engine, 0 none */
+
+static int cc_zone(int v, int n) { return v * n / 128; }
+static int cc_tune_or(int v, int max) { return v ? ((v - 1) * max + 63) / 126 : -1; }   /* 0 the tune's, 1 .. 127: 0 .. max */
+static int cc_mid(int v, int max) { return v < 64 ? (v - 64) * max / 64 : (v - 64) * max / 63; }   /* 64 is 0 */
+
+static int cc_send(int i, int voice, int v)    /* one CC's value to the engine: -1 when its queue is full */
+{
+    static const uint8_t P[NCC] = { RX_P_PW, RX_P_A, RX_P_D, RX_P_S, RX_P_R, RX_P_OCT, RX_P_FINE, RX_P_WAVE_TOGGLE,
+        RX_P_SYNC, RX_P_RING, RX_P_MUTE_TOGGLE, RX_P_SOLO, RX_P_FILT_TOGGLE, RX_P_LFO_RATE, RX_P_LFO_DEPTH,
+        RX_P_LFO_TARGET, RX_P_LFO_SHAPE, RX_P_CUTOFF_MODE, RX_P_CUTOFF, RX_P_RES, RX_P_FMODE_TOGGLE,
+        RX_P_FMODE_TOGGLE, RX_P_FMODE_TOGGLE, RX_P_TEMPO, RX_P_VINYL, 0 };
+    static const uint8_t WAVE[4] = { SID_CTRL_PULSE, SID_CTRL_TRI, SID_CTRL_SAW, SID_CTRL_NOISE };   /* (the panel's order) */
+    int32_t x;
+    uint8_t b = (uint8_t)voice;
+    switch (i) {
+    case CC_PW: x = cc_tune_or(v, SID_PW_MAX); break;
+    case CC_A: case CC_D: case CC_S: case CC_R: x = cc_tune_or(v, SID_NIBBLE_MAX); break;
+    case CC_OCT: x = cc_zone(v, 2 * RX_OCT_MAX + 1) - RX_OCT_MAX; break;
+    case CC_FINE: x = cc_mid(v, RX_FINE_MAX); break;
+    case CC_WAVE: x = cc_zone(v, 5); x = x ? WAVE[x - 1] : 0; break;
+    case CC_SYNC: case CC_RING: case CC_FILT: x = cc_zone(v, 3) - 1; break;   /* the tune's, off, on */
+    case CC_MUTE: case CC_SOLO: x = v >= 64; break;
+    case CC_LFO_RATE: x = v * RX_LFO_NRATE / 128; break;
+    case CC_LFO_DEPTH: x = (v * RX_LFO_DEPTH_MAX + 63) / 127; break;
+    case CC_LFO_TARGET: x = cc_zone(v, RX_LFO_NTARGET); break;
+    case CC_LFO_SHAPE: x = cc_zone(v, RX_LFO_NSHAPE); break;
+    case CC_CUTOFF:                         /* scale: 64 the tune's, x2 every 16; offset: 64 is 0 */
+        if (ui.cut_mode == RX_CUT_OFFSET) x = cc_mid(v, SID_FC_MAX);
+        else { int o = v / 16 - 4; x = RX_CUTOFF_ONE * CUT_EXP[v % 16] >> 8; x = o >= 0 ? x << o : x >> -o; }
+        break;
+    case CC_RES: x = cc_mid(v, SID_NIBBLE_MAX); break;
+    case CC_CUT_MODE:
+        if ((v >= 64) != (ui.cut_mode == RX_CUT_OFFSET)) ui_set_cut_mode(v >= 64 ? RX_CUT_OFFSET : RX_CUT_SCALE);
+        return 0;
+    case CC_LP: case CC_BP: case CC_HP:
+        b = i == CC_LP ? SID_MODE_LP : i == CC_BP ? SID_MODE_BP : SID_MODE_HP;
+        x = cc_zone(v, 3) - 1;
+        break;
+    case CC_TEMPO: x = v <= 64 ? ENG_TEMPO_MIN + v * (100 - ENG_TEMPO_MIN) / 64 : 100 + (v - 64) * (ENG_TEMPO_MAX - 100) / 63; break;
+    case CC_VINYL: x = cc_mid(v, ENG_VINYL_MAX); break;
+    case CC_RESET: if (v >= 64) ui_rx_reset(); return 0;
+    default: return 0;
+    }
+    return eng_post(EV_RX_SET, P[i], b, (uint32_t)x);
+}
+
+static void cc_in(int ch, int cc, int v)
+{
+    int i;
+    if (ui.mode != UI_PLAYER) return;
+    for (i = 0; i < NCC && CC_NUM[i] != cc; i++) {}
+    if (i == NCC) return;
+    cc_pend[i][i < CC_NVOICE ? (ch < 3 ? ch : ui.voice) : 0] = (uint8_t)(v + 1);
+}
+
+static void cc_flush(void)                 /* what came in goes on, the latest value of each */
+{
+    int i, v, any = 0;
+    for (i = 0; i < NCC; i++)
+        for (v = 0; v < 3; v++)
+            if (cc_pend[i][v] && cc_send(i, v, cc_pend[i][v] - 1) == 0) { cc_pend[i][v] = 0; any = 1; }
+    if (any) { ui.dirty_status = ui.dirty_voices = ui.dirty_filter = 1; ui.activity = 1; }
+}
+
 static void ui_midi(void)                  /* the MIDI in queue (USB-MIDI packets: CIN, status, data 1, data 2) */
 {
     uint32_t pkt;
@@ -322,7 +400,9 @@ static void ui_midi(void)                  /* the MIDI in queue (USB-MIDI packet
         if (st == MIDI_NOTE_ON && d2) note_on(ch, d1);
         else if (st == MIDI_NOTE_OFF || st == MIDI_NOTE_ON) note_off(ch, d1);   /* velocity 0: off */
         else if (st == MIDI_CC && (d1 == MIDI_CC_ALL_SOUND_OFF || d1 == MIDI_CC_ALL_NOTES_OFF)) note_off(ch, -1);
+        else if (st == MIDI_CC) cc_in(ch, d1, d2);
     }
+    cc_flush();
 }
 
 static void ui_set_key_mode(int m)
@@ -373,6 +453,14 @@ static void ui_say_keys(void)              /* the keys' range at this octave, F3
     ui_say("KEYS: ", t);
 }
 
+static void ui_rx_reset(void)              /* everything back to the tune: OCT- and OCT+ together, or CC 108 */
+{
+    eng_post(EV_RX_RESET, 0, 0, 0);
+    memset(lane, 0, sizeof lane);            /* the held keys are let go */
+    ui_say("REMIX RESET", 0);
+    ui.dirty_voices = ui.dirty_filter = 1;
+}
+
 static void ui_octave_btn(uint32_t pressed, uint32_t released, uint32_t held)
 {
     uint32_t both = (1u << B_OCTDN) | (1u << B_OCTUP);
@@ -381,10 +469,7 @@ static void ui_octave_btn(uint32_t pressed, uint32_t released, uint32_t held)
     if ((held & both) == both && !ui.both_reset) {
         ui.both_reset = 1;
         ui.oct_pending = 0;
-        eng_post(EV_RX_RESET, 0, 0, 0);
-        memset(lane, 0, sizeof lane);        /* the held keys are let go */
-        ui_say("REMIX RESET", 0);
-        ui.dirty_voices = ui.dirty_filter = 1;
+        ui_rx_reset();
         return;
     }
     if (ui.mode == UI_PLAYER) {

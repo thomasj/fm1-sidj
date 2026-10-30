@@ -4,6 +4,7 @@
 # C64 environment, the remix, the ASID sink, the storage, and the whole app in the simulator
 # (tests/scenarios/*.in, output in build/scenarios/). HVSC at $HVSC (default ~/Music/C64Music)
 # gives the scenarios real tunes; without it they play the tune c64_test writes.
+# $FM1_OFFICIAL, M-VAVE's FM-1.fwsc, adds the update entry's way back to the official firmware.
 set -e
 cd "$(dirname "$0")/.."
 CC="${CC:-cc}"
@@ -88,6 +89,10 @@ PY="${PYTHON:-python3}"
 if [ -f build/sidj.fwsc ]; then
     echo "== ota_test (the update entry, against build/sidj.fwsc)"
     $CC -O1 -w -o build/host/ota_test tests/ota_test.c && build/host/ota_test build/sidj.fwsc
+    if [ -n "$FM1_OFFICIAL" ]; then          # M-VAVE's FM-1.fwsc (V15 or V16; not redistributable, so not in the tree)
+        echo "== ota_test (the way back: the official package, $FM1_OFFICIAL)"
+        build/host/ota_test "$FM1_OFFICIAL"
+    fi
     if [ -f "${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}/cpu/wl82/tools/uboot.boot" ]; then
         echo "== ldr_test (the update loader: an old app replaced by the package)"
         export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"

@@ -13,6 +13,10 @@
  * staging began erases the staging area, and Felucca carries on. A package
  * whose flash.bin is not exactly this board's size (OTA_FL_LEN: another
  * board's package) is refused in step 1, before anything is erased (Felucca 1.6.1).
+ * The official loader's packages may be larger (V16's is 0xA9000): it writes the
+ * whole flash.bin, whose head must equal this FM-1's or be M-VAVE's own (V15's,
+ * V16's: they differ, and an FM-1 keeps the head it last had from M-VAVE), so any
+ * length from OTA_FL_LEN up to the staging area is taken from it.
  *
  * The firmware (felucca.c) and the host test supply these hooks:
  *   ota_wire_send(p, n)        one complete F0..F7 message to the host
@@ -28,7 +32,10 @@
 #define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xE4F00 = 4K boundary - 256: SPL scan */
 #define OTA_FL_LEN 0x93000u                      /* flash.bin = [0, the PRCT end): the head and this board's app area,
                                                   * the size the update loader writes (ldr_core.c LDR_APP_HI) */
-#define OTA_LDR_HCRC 0xEBAAu                     /* official update loader (usb_hid_ota.bin) */
+#define OTA_FL_OFFICIAL_MAX OTA_AREA             /* the official loader's flash.bin: up to the staging area */
+#define OTA_HEAD_V15 0x3FEEu                     /* CRC of the official packages' head, flash [0, 0x4000) */
+#define OTA_HEAD_V16 0x22B0u
+#define OTA_LDR_HCRC 0xEBAAu                     /* official update loader (usb_hid_ota.bin; V15 and V16) */
 #define OTA_LDR_DCRC 0x5881u
 #define OTA_LDR_LEN 0x4DE1u
 #define OTA_FRAME_MAX 640u                       /* 512-B response = 605 wire bytes */
@@ -271,7 +278,7 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
         return rc;
     if (!fl_off || !ota_off)
         return -3;
-    if (fl_len != OTA_FL_LEN)
+    if (fl_len < OTA_FL_LEN || fl_len > OTA_FL_OFFICIAL_MAX || fl_len % 0x1000u)
         return -15;                                         /* another board's package: nothing staged, nothing erased */
     /* 2. which loader: the official one (known CRCs; it rewrites the whole flash.bin
      *    including the head) or Felucca's own (app area only, checks the chip key) */
@@ -287,14 +294,20 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
         own = ota_memeq(b + i, (const uint8_t *)"FELUCCA-LOADER-1", 16) && ota_rd32(b + 0x20 + 4) <= 0x14000u;
     if (!official && !own)
         return -7;
-    if (official) {                    /* the official loader writes the head: it must equal ours */
+    if (!official && fl_len != OTA_FL_LEN)
+        return -15;                                         /* Felucca's loader writes exactly this board's app area */
+    if (official) {                    /* the official loader writes the head: it must equal ours, or be M-VAVE's */
+        uint32_t hc = 0, same = 1;
         ota_show(2, 0);
         for (i = 0; i < 0x4000u; i += 512u) {
             if (ota_read(fl_off + i, b, 512) || ota_fread(i, mine, 512))
                 return -4;
+            hc = ota_crc16(b, 512, hc);
             if (!ota_memeq(b, mine, 512))
-                return -5;
+                same = 0;
         }
+        if (!same && hc != OTA_HEAD_V15 && hc != OTA_HEAD_V16)
+            return -5;
     }
     /* 4. stage the package's loader: erase, body, verify, head last */
     ota_show(3, 0);
