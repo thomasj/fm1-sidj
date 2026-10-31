@@ -69,6 +69,11 @@ class SIDJ extends AudioWorkletProcessor {
     } else if (m.type === "delete") {
       this.ex.web_song_delete(m.k | 0);
       this.port.postMessage({ type: "put", id: -1, rc: 0, count: this.ex.web_song_count(), used: this.ex.web_pool_used() });
+    } else if (m.type === "sx") {                     // a SysEx frame in (the bytes between F0 and F7), as from fm1_sid.py
+      const b = new Uint8Array(m.bytes);
+      this.ex.web_sx_out_clear();                    // (the answer is not needed here)
+      this.bytes(this.ex.web_sx_in_buf(), b.length).set(b);
+      this.ex.web_sx_in(b.length);
     } else if (m.type === "clear") {
       this.ex.web_songs_clear();
       this.port.postMessage({ type: "put", id: -1, rc: 0, count: 0, used: this.ex.web_pool_used() });

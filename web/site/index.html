@@ -268,7 +268,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
           <summary>Go back to the official firmware</summary>
           <div class="card sub">
             <p class="small">Download the official FM-1 firmware (V16) from <a href="https://www.m-vave.com/download" target="_blank" rel="noopener">M-VAVE</a> and
-              choose the unmodified FM-1.fwsc. An FM-1.fwsc of V15 you already have works too. The browser checks it here and sends it nowhere else. The songs on the FM-1 are not kept,
+              choose the unmodified FM-1.fwsc. An FM-1.fwsc of V15 you already have works too. Save a setlist in step 2 first. The browser checks it here and sends it nowhere else. The songs on the FM-1 are not kept,
               because the official firmware can't read them.</p>
             <div class="row"><label class="btn sm">Choose FM-1.fwsc<input id="stockfile" type="file" accept=".fwsc"></label>
               <button class="btn sm" id="stockgo" disabled>Install the official firmware</button></div>
@@ -291,11 +291,17 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
             <div class="row small"><span id="usedtxt"></span>
               <button class="btn sm" id="refresh">Refresh</button>
               <button class="btn sm" id="compact" title="Deleting leaves gaps: this fetches every song, empties the store and sends them back">Tidy up</button>
-              <button class="btn sm" id="wipe">Remove all</button></div>
+              <button class="btn sm" id="wipe">Remove all</button>
+              <button class="btn sm" id="savesl" title="Every song on the FM-1 in one .zip, with the order and the song lengths">Save setlist</button>
+              <label class="btn sm" title="Put the songs of a saved setlist on the FM-1 (those it does not have yet)">Load setlist<input id="loadsl" type="file" accept=".zip"></label></div>
+            <div class="row small" id="restore" hidden><span id="restoretxt"></span>
+              <button class="btn sm primary" id="restorego">Put them back</button></div>
             <table><thead><tr><th>#</th><th>Song</th><th>Lengths</th><th>Size</th><th></th></tr></thead><tbody id="list"></tbody></table>
           </div>
           <p class="status" id="songstat"></p>
           <progress id="songbar" max="100" value="0" hidden></progress>
+          <p class="small" style="margin:10px 0 0">Another firmware does not keep SiDJ's songs. Save a setlist before you try one, and load it
+            when you are back. This browser also keeps a copy of your songs and offers it back when it finds the FM-1 empty.</p>
         </div>
         <div class="card sub" id="startercard">
           <h3>Start with my tunes</h3>
@@ -503,7 +509,8 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
 import { productOf, logicalImage, validateStockPackage, STOCK } from "./fm1pkg.js";
 import { Updater } from "./fm1ota.js";
 import { findFM1, midiInputs, parseSonglengths, md5, hex, sidInfo, fmtLen, FILE_MAX, openHvsc, readHvsc, searchHvsc, prettyPath,
-         rememberFolder, recallFolder, folderAccess, starterTunes, addMissing } from "./fm1songs.js";
+         rememberFolder, recallFolder, folderAccess, starterTunes, addMissing, songKey, setlistZip, readSetlist,
+         keepCopy, recallCopy } from "./fm1songs.js";
 
 const $ = (id) => document.getElementById(id);
 const say = (el, text, warn = false) => { $(el).textContent = text; $(el).classList.toggle("warn", warn); };
@@ -630,6 +637,7 @@ async function connect() {
     $("connect").textContent = "Disconnect";
     $("store").hidden = false;
     await refresh();
+    updateCopy();
   } catch (e) { say("devstat", e.message, true); songs = null; }
 }
 $("connect").addEventListener("click", () => (songs ? disconnect() : connect()));
@@ -643,6 +651,7 @@ async function job(text, fn) {                              // one thing at a ti
   try { await fn(); } catch (e) { say("songstat", e.message, true); }
   $("songbar").hidden = true;
   busy = false;
+  updateCopy();
 }
 const progress = (p) => { $("songbar").hidden = false; $("songbar").value = Math.round(p * 100); };
 
@@ -675,7 +684,68 @@ async function refresh() {
     tb.appendChild(tr);
   });
   if (!list.some(Boolean)) tb.innerHTML = `<tr><td></td><td class="muted" colspan="4">No songs yet: add some below.</td></tr>`;
+  shown = list.filter(Boolean);
+  await offerCopy();
 }
+
+// ---- setlists, and the copy of the song list kept in this browser
+let shown = [], copy = null, copied = "";                    // the list as last read; the browser's copy; its songs' keys
+const listSig = (l) => l.map((e) => songKey(e) + "\u0000" + e.lens.join(",")).join("\n");
+const fromCopy = (e) => { const c = copy && copy.songs.find((x) => songKey(x) === songKey(e)); return c ? c.bytes : null; };
+async function offerCopy() {                                  // the FM-1 empty and a copy here: offer it back
+  if (!copy) copy = await recallCopy();
+  const n = copy ? copy.songs.length : 0;
+  $("restore").hidden = !(n && !shown.length);
+  if (n) $("restoretxt").textContent = `This browser has a copy of your ${n} song${n === 1 ? "" : "s"} from ${new Date(copy.saved).toLocaleString()}.`;
+}
+async function updateCopy() {                                 // after each job: the copy follows the FM-1 (never an empty list)
+  if (!songs || busy || !shown.length || listSig(shown) === copied) return;
+  busy = true;
+  try {
+    if (!copy) copy = await recallCopy();
+    const missing = shown.filter((e) => !songs.sent.has(songKey(e)) && !fromCopy(e)).length;
+    if (missing) say("songstat", `Keeping a copy of your songs in this browser…`);
+    const items = await songs.fetchAll(missing ? progress : null, fromCopy);
+    if (await keepCopy(items)) { copy = { saved: Date.now(), songs: items }; copied = listSig(shown); }
+    if (missing) say("songstat", `A copy of your ${items.length} songs is kept in this browser.`);
+  } catch (e) { say("songstat", "No copy kept in this browser: " + e.message, true); }
+  $("songbar").hidden = true;
+  busy = false;
+}
+async function putBack(items, what) {                         // songs the FM-1 does not have yet, in their order
+  const have = new Set(shown.map(songKey));
+  let done = 0, skipped = 0;
+  const failed = [];
+  for (const it of items) {
+    if (have.has(songKey({ ...it, size: it.bytes.length }))) { skipped++; continue; }
+    say("songstat", `${what}: ${it.name} (${done + 1})`);
+    const lens = it.lens || (lengths && lengths.get(hex(md5(it.bytes)))) || [];
+    try { await songs.put(it.bytes, lens, progress); done++; }
+    catch (e) { failed.push(`${it.name} (${e.message})`); if (/full/.test(e.message)) break; }
+  }
+  await refresh();
+  say("songstat", `${done} song${done === 1 ? "" : "s"} put back.` + (skipped ? ` ${skipped} already on the FM-1.` : "") +
+                  (failed.length ? ` Not added: ${failed.join(", ")}.` : ""), failed.length > 0);
+}
+$("savesl").addEventListener("click", () => job("Saving the setlist", async () => {
+  const items = await songs.fetchAll(progress, fromCopy);
+  if (!items.length) { say("songstat", "No songs on the FM-1 to save."); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([setlistZip(items)], { type: "application/zip" }));
+  a.download = `SiDJ setlist ${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  say("songstat", `Saved ${a.download}: ${items.length} songs.`);
+}));
+$("loadsl").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  let items;
+  try { items = await readSetlist(new Uint8Array(await f.arrayBuffer())); }
+  catch (err) { say("songstat", `${f.name}: ${err.message}`, true); return; }
+  job(`Loading ${f.name}`, () => putBack(items, "Loading the setlist"));
+});
+$("restorego").addEventListener("click", () => job("Putting your songs back", () => putBack(copy ? copy.songs : [], "Putting back")));
 $("refresh").addEventListener("click", () => job("Reading the song list", async () => { await refresh(); say("songstat", ""); }));
 $("compact").addEventListener("click", () => job("Tidying up", async () => {
   const n = await songs.compact((what, p) => { say("songstat", what === "fetch" ? "Tidying up: fetching" : "Tidying up: sending back"); progress(p); });

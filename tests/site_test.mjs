@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // The site's song module (web/site/fm1songs.js) against the device's own song store: the
 // simulator (build/emu/sidj.wasm, which runs firmware/src/app/songs.c) stands in for the
-// FM-1 on the other end of the MIDI cable. Add, list, fetch back, delete, compact, play, wipe;
+// FM-1 on the other end of the MIDI cable. Add, list, fetch back, delete, compact, play, wipe,
+// a setlist saved and loaded back;
 // and HVSC's Songlengths.md5 parsed as the page parses it, when HVSC is on this machine.
 //   node tests/site_test.mjs SID_FILE SID_FILE2 [HVSC_DIR]
 import { readFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { Songs, parseSonglengths, md5, hex, crc16, sidInfo, addMissing } from "../web/site/fm1songs.js";
+import { Songs, parseSonglengths, md5, hex, crc16, crc32, sidInfo, addMissing, songKey, setlistZip, readSetlist, readZip } from "../web/site/fm1songs.js";
 
 let fails = 0;
 const check = (ok, what) => { console.log(`  ${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) fails++; };
@@ -104,6 +105,32 @@ check(await addMissing(songs, tunes) === 2 && (await songs.info()).count === 2, 
 check(await addMissing(songs, tunes) === 0 && (await songs.info()).count === 2, "addMissing: run again, nothing added twice");
 await songs.delete(0);
 check(await addMissing(songs, tunes) === 1 && (await songs.list()).filter(Boolean).length === 2, "addMissing: a deleted one comes back, alone");
+await songs.wipe();
+
+// a setlist: every song fetched (those put this visit not fetched again), zipped, the store
+// emptied, the setlist read back and its songs put on again in order, with their lengths
+check(crc32(new TextEncoder().encode("123456789")) === 0xCBF43926, "crc32 of 123456789");
+await songs.put(bytes1, [600, 1234]);
+await songs.put(bytes2, [99]);
+for (const t of tunes) await songs.put(t.bytes, t.lens);
+const ours = transport.onSysex, fresh = new Songs(transport);              // (another visit: nothing cached)
+const items = await fresh.fetchAll();
+transport.onSysex = ours;
+check(items.length === 4 && items[0].bytes.every((b, i) => b === bytes1[i]) && items[1].lens.join() === "99", "fetchAll: four songs, files and lengths");
+let gets = 0;
+const askOrig = songs.ask.bind(songs);
+songs.ask = (cmd, ...a) => { if (cmd === 6) gets++; return askOrig(cmd, ...a); };
+await songs.fetchAll();
+songs.ask = askOrig;
+check(gets === 0, "fetchAll: the files put this visit come from the page, not the cable");
+const zip = setlistZip(items), names = (await readZip(zip)).map((f) => f.name);
+check(names[0] === "setlist.json" && names.length === 5 && /^01 .*\.sid$/.test(names[1]), `the setlist: ${names.join(", ")}`);
+const before = (await songs.list()).map(songKey).join("|"), beforeLens = (await songs.list()).map((e) => e.lens.join()).join("|");
+await songs.wipe();
+for (const it of await readSetlist(zip)) await songs.put(it.bytes, it.lens);
+const afterList = await songs.list();
+check(afterList.map(songKey).join("|") === before && afterList.map((e) => e.lens.join()).join("|") === beforeLens,
+      "loaded back: the same songs in the same order, with the same lengths");
 await songs.wipe();
 
 if (hvsc && existsSync(`${hvsc}/DOCUMENTS/Songlengths.md5`)) {

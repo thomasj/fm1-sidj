@@ -5,7 +5,9 @@
 // wipe and compact .sid files, as tools/fm1_sid.py does from the command line. Protocol
 // (firmware/src/app/songs.c): F0 7D 'S' cmd payload F7, the payload packed 7 bytes into 8 (a
 // byte of the seven high bits first); the answer comes back as cmd | 0x40.
-// Also HVSC's Songlengths.md5 (md5 of the file -> song lengths) and an MD5 to look files up.
+// Also HVSC's Songlengths.md5 (md5 of the file -> song lengths) and an MD5 to look files up,
+// and setlists: every song in one .zip, and a copy kept in this browser, to put back after
+// another firmware has been on the FM-1.
 
 export const INFO = 1, ENTRY = 2, PUT_BEGIN = 3, PUT_DATA = 4, PUT_END = 5, GET = 6, DELETE = 7, WIPE = 8, PLAY = 9;
 export const MAX_LENS = 64, FILE_MAX = 61440;
@@ -126,6 +128,7 @@ export class Songs {
     this.t = transport;
     this.waiting = null;                     // {cmd, resolve}
     this.busy = Promise.resolve();
+    this.sent = new Map();                   // songKey -> the bytes of each file put this visit
     this.t.onSysex = (d) => {
       if (d.length < 5 || d[1] !== 0x7D || d[2] !== 0x53) return;
       if (this.waiting && d[3] === (0x40 | this.waiting.cmd)) {
@@ -199,6 +202,7 @@ export class Songs {
     }
     const status = (await this.ask(PUT_END, le(crc16(bytes), 2), 30000))[0];
     if (status) throw fail(`the FM-1 did not keep the file: ${PUT_ERRORS[status] || status}`);
+    this.sent.set(songKey({ ...info, size: bytes.length }), bytes);
   }
 
   async get(k, size, onProgress = null) {
@@ -218,14 +222,22 @@ export class Songs {
   async play(k, subsong = 0) { if ((await this.ask(PLAY, [k & 0xFF, k >> 8, subsong & 0xFF]))[0]) throw fail("the FM-1 could not play it"); }
   async wipe() { if ((await this.ask(WIPE, [0x57, 0x49, 0x50, 0x45], 60000))[0]) throw fail("wipe failed"); }
 
+  // every live song with its file, in order; a file this page already has (cached(entry) -> bytes,
+  // or one put this visit) is not fetched again
+  async fetchAll(onProgress = null, cached = null) {
+    const live = (await this.list()).filter(Boolean), out = [];
+    for (const [i, e] of live.entries()) {
+      let bytes = this.sent.get(songKey(e)) || (cached && cached(e)) || null;
+      if (!bytes || bytes.length !== e.size) bytes = await this.get(e.k, e.size);
+      out.push({ name: e.name, author: e.author, released: e.released, size: e.size, lens: e.lens, bytes });
+      if (onProgress) onProgress((i + 1) / live.length);
+    }
+    return out;
+  }
+
   // deleting leaves holes: fetch everything live, wipe, send it all back
   async compact(onProgress = null) {
-    const live = await this.list(), kept = [];
-    for (const [i, e] of live.entries()) {
-      if (!e) continue;
-      kept.push({ bytes: await this.get(e.k, e.size), lens: e.lens });
-      if (onProgress) onProgress("fetch", (i + 1) / live.length);
-    }
+    const kept = await this.fetchAll((p) => onProgress && onProgress("fetch", p));
     await this.wipe();
     for (const [i, s] of kept.entries()) {
       await this.put(s.bytes, s.lens);
@@ -348,4 +360,100 @@ export async function addMissing(songs, tunes, onEach = null) {
     added++;
   }
   return added;
+}
+
+// ---- setlists. A setlist is a .zip of the songs (01 Name.sid, 02 ...) and setlist.json (their
+// order, names and song lengths), so it opens anywhere and the tunes play in other players too.
+// The FM-1 cannot keep SiDJ's songs while another firmware is on it; a setlist puts them back.
+// The page also keeps the last song list in this browser (IndexedDB) and offers it back when it
+// finds the FM-1 empty.
+
+// a song as the store lists it: name, author and file size (the entry carries no checksum)
+export const songKey = (e) => `${e.name}\u0000${e.author}\u0000${e.size}`;
+
+const CRC32 = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[i] = c >>> 0; } return t; })();
+export function crc32(b) { let c = ~0; for (let i = 0; i < b.length; i++) c = CRC32[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return ~c >>> 0; }
+
+// a .zip, files stored as they are (they are small): [{name, bytes}] -> Uint8Array
+export function makeZip(files, when = new Date()) {
+  const enc = new TextEncoder(), parts = [], dir = [];
+  const time = (when.getHours() << 11) | (when.getMinutes() << 5) | (when.getSeconds() >> 1);
+  const date = ((when.getFullYear() - 1980) << 9) | ((when.getMonth() + 1) << 5) | when.getDate();
+  let off = 0;
+  for (const f of files) {
+    const nm = enc.encode(f.name), n = f.bytes.length, crc = crc32(f.bytes);
+    const common = [20, 0, 0, 8, 0, 0, ...le(time, 2), ...le(date, 2), ...le(crc, 4), ...le(n, 4), ...le(n, 4), ...le(nm.length, 2), 0, 0];
+    const local = Uint8Array.from([0x50, 0x4B, 3, 4, ...common]);   // (flag 0x0800: the names are UTF-8)
+    parts.push(local, nm, f.bytes);
+    dir.push(Uint8Array.from([0x50, 0x4B, 1, 2, 20, 0, ...common, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...le(off, 4)]), nm);
+    off += local.length + nm.length + n;
+  }
+  const dsize = dir.reduce((a, b) => a + b.length, 0);
+  const end = Uint8Array.from([0x50, 0x4B, 5, 6, 0, 0, 0, 0, ...le(files.length, 2), ...le(files.length, 2), ...le(dsize, 4), ...le(off, 4), 0, 0]);
+  const all = [...parts, ...dir, end], out = new Uint8Array(all.reduce((a, b) => a + b.length, 0));
+  let o = 0;
+  for (const p of all) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+// the files of a .zip: [{name, bytes}]; stored or deflated (a setlist zipped again by the user)
+export async function readZip(zip) {
+  const u32 = (o) => rd(zip, o, 4), u16 = (o) => rd(zip, o, 2);
+  let e = zip.length - 22;
+  while (e >= 0 && u32(e) !== 0x06054B50) e--;
+  if (e < 0) throw fail("not a .zip file");
+  const out = [], dec = new TextDecoder();
+  for (let i = 0, c = u32(e + 16); i < u16(e + 10); i++) {
+    if (u32(c) !== 0x02014B50) throw fail("a damaged .zip file");
+    const method = u16(c + 10), csize = u32(c + 20), nlen = u16(c + 28), name = dec.decode(zip.subarray(c + 46, c + 46 + nlen));
+    const lo = u32(c + 42), data = zip.subarray(lo + 30 + u16(lo + 26) + u16(lo + 28), lo + 30 + u16(lo + 26) + u16(lo + 28) + csize);
+    c += 46 + nlen + u16(c + 30) + u16(c + 32);
+    if (name.endsWith("/")) continue;
+    if (method === 0) out.push({ name, bytes: data.slice() });
+    else if (method === 8) {
+      const s = new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      out.push({ name, bytes: new Uint8Array(await new Response(s).arrayBuffer()) });
+    } else throw fail(`${name}: packed in a way this page cannot read`);
+  }
+  return out;
+}
+
+// songs (as fetchAll gives them) -> the setlist file
+export function setlistZip(items, when = new Date()) {
+  const files = items.map((it, i) => ({ ...it, file: `${String(i + 1).padStart(2, "0")} ${(it.name || "song").replace(/[^\w .,'&()-]+/g, "_").trim()}.sid` }));
+  const json = { format: "sidj-setlist", version: 1, saved: when.toISOString(),
+                 songs: files.map((f) => ({ file: f.file, name: f.name, author: f.author, released: f.released, lens: f.lens })) };
+  return makeZip([{ name: "setlist.json", bytes: new TextEncoder().encode(JSON.stringify(json, null, 1) + "\n") },
+                  ...files.map((f) => ({ name: f.file, bytes: f.bytes }))], when);
+}
+
+// a setlist file -> [{name, author, bytes, lens}] in its order. Without setlist.json (any .zip of
+// .sid files) the files in name order, lens null (the page looks them up where it can)
+export async function readSetlist(zipBytes) {
+  const files = await readZip(zipBytes), byName = new Map(files.map((f) => [f.name, f]));
+  const sl = byName.get("setlist.json");
+  const pick = (f, lens) => { const info = sidInfo(f.bytes); return info ? { name: info.name, author: info.author, file: f.name, bytes: f.bytes, lens } : null; };
+  if (sl) {
+    let j;
+    try { j = JSON.parse(new TextDecoder().decode(sl.bytes)); } catch { throw fail("setlist.json cannot be read"); }
+    return (j.songs || []).map((e) => byName.get(e.file) && pick(byName.get(e.file), Array.isArray(e.lens) ? e.lens : null)).filter(Boolean);
+  }
+  const sids = files.filter((f) => /\.sid$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name));
+  if (!sids.length) throw fail("no .sid files in it");
+  return sids.map((f) => pick(f, null)).filter(Boolean);
+}
+
+// the copy in this browser: {saved (ms), songs: [{name, author, released, size, lens, bytes}]}
+export async function keepCopy(items) {
+  try {
+    const db = await kv(), copy = { saved: Date.now(), songs: items };
+    await new Promise((res, rej) => { const t = db.transaction("kv", "readwrite"); t.objectStore("kv").put(copy, "setlist"); t.oncomplete = res; t.onerror = () => rej(t.error); });
+    return true;
+  } catch { return false; }
+}
+export async function recallCopy() {
+  try {
+    const db = await kv();
+    return await new Promise((res) => { const r = db.transaction("kv").objectStore("kv").get("setlist"); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); });
+  } catch { return null; }
 }

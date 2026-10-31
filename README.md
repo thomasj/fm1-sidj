@@ -28,6 +28,11 @@ The sound comes out three ways, alone or together:
 3. Play. The [browser emulator](https://thomasj.github.io/fm1-sidj/emu/) runs the same
    firmware if you want to try it first.
 
+The emulator also takes a song from another page: opened as `emu/#import`, it tells the page
+that opened it that it is ready, takes one .sid from it, adds it to its songs and plays it when
+switched on. SID Factory II Pocket's page uses it to
+open a song composed on the FM-1 in SiDJ, ready to play and remix.
+
 Installing custom firmware is at your own risk. The same page puts M-VAVE's official firmware
 back whenever you like.
 
@@ -185,7 +190,9 @@ and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the ch
 firmwares built on it keep their user samples (0xA0000 to 0xDBFFF). Adding songs erases what
 another firmware saved there, and other firmwares cannot read SiDJ's songs. SiDJ ignores
 anything in the area that is not a SiDJ song. Back up your samples and projects before you
-install SiDJ.
+install SiDJ. Going the other way, save a setlist on the web page (step 2) before you install another
+firmware: it keeps every song, its order and song lengths in one .zip, and Load setlist puts them
+back. The page also keeps a copy in the browser and offers it back when it finds the FM-1 empty.
 
 ## Songs from the command line
 
