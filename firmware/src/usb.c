@@ -143,9 +143,41 @@ static volatile uint32_t so_w, so_r;
 /* MIDI rings: 4-byte USB-MIDI event packets */
 #define MQ 256u                                     /* ASID: up to 14 packets a chip and frame */
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
+/* the MIDI clock coming in, from TIMER5 (USB and the jack): each pulse's time and number, Start
+ * numbering from 0, Stop to Continue not counted (plat.h). Start, Stop and Continue go on to midi_in_q too */
+#define CQ 32u
+#ifndef PLAT_CLK_FREE                                  /* (the loader: no plat.h) */
+#define PLAT_CLK_FREE 0xFFFFFFFFu
+#define PLAT_CLK_START 0xFFFFFFFEu
+#define PLAT_CLK_STOP 0xFFFFFFFDu
+#endif
+static uint32_t ci_t[CQ], ci_k[CQ], ci_n;
+static volatile uint32_t ci_w, ci_r;
+static uint8_t ci_stopped;
+static void clock_in(uint32_t b)
+{
+    uint32_t k;
+    if (b == 0xFBu) { ci_stopped = 0; return; }
+    if (b == 0xFCu) { ci_stopped = 1; k = PLAT_CLK_STOP; }
+    else if (b == 0xFAu) { ci_n = 0; ci_stopped = 0; k = PLAT_CLK_START; }
+    else if (b != 0xF8u) return;
+    else k = ci_stopped ? PLAT_CLK_FREE : ci_n++;
+    if (ci_w - ci_r < CQ) {
+        ci_t[ci_w % CQ] = fm1_ticks();
+        ci_k[ci_w % CQ] = k;
+        RING_PUBLISH();
+        ci_w++;
+    } else {                                            /* full: the newest slot the latest (the reader is CQ behind) */
+        ci_t[(ci_w - 1u) % CQ] = fm1_ticks();
+        ci_k[(ci_w - 1u) % CQ] = k;
+    }
+}
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
 
-static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
+/* from the audio ISR (plat_midi_out*: IRQs off around it, TIMER5 nests into the render) and from
+ * TIMER5 itself (the MIDI clock's rt_service): nothing preempts TIMER5 that writes here, so no guard
+ * there (and none may be: irq_restore's sti would let TIMER5 nest into itself, into usb_poll) */
+static void midi_out_event(uint32_t pkt)
 {
     if (usb.config && mo_w - mo_r < MQ) {
         midi_out_q[mo_w % MQ] = pkt;
@@ -698,8 +730,11 @@ static void ep1_rx(void)
             uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
             for (k = 0; k < nb; k++)
                 sysex_byte(ep1rx[i + 1 + k]);
+        } else if (cin == 0xFu && ep1rx[i + 1] == 0xF8u) {
+            clock_in(0xF8u);                            /* the clock: timed here, not queued */
         } else if (((cin >= 8u && cin <= 0xEu) || (cin == 0xFu && ep1rx[i + 1] >= 0xF8u)) && mi_w - mi_r < MQ) {
-            /* CIN 0xF: a single byte; the real-time ones (clock, start, continue, stop) matter */
+            /* CIN 0xF: a single byte; the real-time ones (start, continue, stop) matter */
+            if (cin == 0xFu) clock_in(ep1rx[i + 1]);
             midi_in_q[mi_w % MQ] = pkt;
             RING_PUBLISH();
             mi_w++;
@@ -803,6 +838,15 @@ static void ep1_tx(void)
     fm1_usb_ep_send(1, ep1tx, n);
     sie_wr(S_TXCSR1, sie_rd(S_TXCSR1) | 0x01u);
     usb.tx_pkts++;
+}
+
+/* MIDI out during a render (TIMER5, which nests into it, while usb_poll waits for the render's end):
+ * the MIDI clock's pulses leave on time. EP1 only, after uac_service in the same ISR, so INDEX is
+ * not shared; ASID's messages went into the ring whole (plat_midi_out_msg) */
+static void usb_render_tx(void)
+{
+    if (usb.up && usb.config)
+        ep1_tx();
 }
 
 #if FELUCCA_CDC

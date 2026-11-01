@@ -9,6 +9,14 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
   r0-r15; control registers icfg/psr/sp/ssp/usp/rets/reti (`firmware/crt0.S`).
 - **Clock**: measured by X0X at PLL 540 MHz, system clock **360 MHz**, HSB 180 MHz, LSB
   (peripherals) 60 MHz. About 8160 CPU cycles per output sample at 44.1 kHz.
+  That is what M-VAVE's **V15** boot loader sets up. The **V16** boot loader (in the flash head,
+  which custom firmware updates leave, so an FM-1 keeps the one it last had from M-VAVE) runs at
+  **320 MHz**: its isd_config asks for `SYS_CLK` 320 MHz instead of 360, PLL2 stays off (0x119A8 and
+  0x119AC read 0, `CLK_CON2` bit 2 clear) and the flash timing differs (`SFC_CON` [23:20] 8, not 9).
+  Everything is 12 % slower. SiDJ sets V15's clock up at boot when it finds V16's
+  (`fm1_pll2_540`, `fl_clock_v15_ram`, in the AC79 SDK's order: PLL2 first, then the switch with the
+  CPU on the 16 MHz RC and XIP off). Switching to PLL2 without setting it up first crashes the FM-1
+  into UBOOT.
 - **FPU**: single precision in hardware with `-mcpu=r3 -mfprev1` (divide yes, no sqrt, no FMA).
   `double` is software and X0X's build fails if a soft-double routine gets linked. The divide-
   by-zero trap also fires on float divides and must stay off. Felucca is integer only.
@@ -61,14 +69,15 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
 
 ## Display
 
-- ST7789-class **240 x 240 RGB565** IPS on SPI1 at 12 MHz, backlight PA2 active-low. Pixel
-  data by SPI DMA from RAM, big-endian pixels (byte-swap).
+- ST7789-class **240 x 240 RGB565** IPS on SPI1, backlight PA2 active-low. Pixel data by SPI
+  DMA from RAM, big-endian pixels (byte-swap). Felucca clocks SPI1 at 12 MHz; SiDJ at 60 MHz
+  (about 44 effective), since at 12 a strip took longer than the panel's refresh and tore.
 - No full framebuffer: `src/gfx.c` draws into an off-screen canvas of 240 x 124 pixels in
   `.pool` and blits strips (`cv_begin`, `cv_rect`, `cv_text`, `cv_blit`, ...). A full frame
   would take ~77 ms to push, so UIs redraw strips.
 - Fonts: Felucca rasterises Inter Tight at build time into 4-bit alpha glyphs
   (`tools/gen_aa_font.py`, needs Pillow and fontTools). X0X uses a simpler bitmap font
-  generator (`x0x/tools/gen_font.py`).
+  generator (`x0x/tools/gen_font.py`), which SiDJ's `tools/gen_font.py` builds on.
 
 ## Boot, package, update
 

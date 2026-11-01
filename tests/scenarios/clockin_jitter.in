@@ -1,0 +1,34 @@
+# A MIDI clock coming in over USB lands each pulse up to a frame (1 ms) early or late: the tempo
+# followed is measured over a bar, so it holds steady (120.0 give or take 0.1; the tune's beat within about 3 ms, a pulse's
+# own jitter included), and a new tempo is
+# still taken within a beat or so (the last 12 pulses 4 % off the bar's)
+sid @SID1@
+turn K2 3
+clockin 120 1
+wait 300
+midi fa 0 0
+wait 5000
+expect follow 1
+expect follow_bpm >1198
+expect follow_bpm <1202
+wait 137
+expect follow_bpm >1198
+expect follow_bpm <1202
+wait 211
+expect follow_bpm >1198
+expect follow_bpm <1202
+wait 173
+expect follow_bpm >1198
+expect follow_bpm <1202
+wait 2000
+expect follow_err >-40
+expect follow_err <40
+clockin 140 1
+wait 700
+expect follow_bpm >1380
+expect follow_bpm <1420
+wait 3000
+expect follow_bpm >1398
+expect follow_bpm <1402
+expect follow_err >-40
+expect follow_err <40

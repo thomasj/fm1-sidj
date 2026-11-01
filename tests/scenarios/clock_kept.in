@@ -1,0 +1,33 @@
+# SID+CLK: the tempo a load finds is kept for the song, and its next load takes it without looking
+# (MIDI CLOCK: ... KEPT); GLO's KNOB 4 turned away and back to x1 forgets it, and the next load
+# looks again (and keeps what it finds)
+sid @SID1@
+turn K2 3
+tap PLAY
+wait 300
+expect playing 1
+expect clk_on 1
+expect clk_kept 0
+expect kept 1
+tap SEQ
+wait 100
+tap PLAY
+wait 300
+expect clk_kept 1
+expect msg_kept 1
+expect clk_bpm >1250
+expect clk_bpm <1256
+tap GLO
+turn K4 1
+wait 100
+expect kept 1
+turn K4 -1
+wait 100
+expect kept 0
+tap SEQ
+wait 100
+tap PLAY
+wait 300
+expect clk_kept 0
+expect clk_on 1
+expect kept 1

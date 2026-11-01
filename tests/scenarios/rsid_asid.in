@@ -17,5 +17,8 @@ expect output 2
 wait 500
 expect asid_msgs 0
 turn ALGO 1
+expect output 3
+expect clk_on 0
+turn ALGO 1
 expect output 0
 expect asid_msgs 0

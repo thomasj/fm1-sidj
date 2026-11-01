@@ -41,8 +41,8 @@ static const int8_t VOICE_BTN[3] = {B_HOME, B_SAVE, B_ARP};
 static const int8_t WAVE_BTN[6] = {B_FX, B_SEL, B_ENV, B_LFO, B_EDIT, B_GLO};
 static const uint8_t WAVE_BIT[6] = {SID_CTRL_PULSE, SID_CTRL_TRI, SID_CTRL_SAW, SID_CTRL_NOISE, SID_CTRL_SYNC, SID_CTRL_RING};
 static const char *const NOTE_NAME[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
-static const char *const OUT_NAME[3] = {"EMULATED SID", "ASID OVER USB-MIDI", "SID + ASID"};
-static const char *const OUT_TAG[3] = {"", "ASID", "BOTH"};
+static const char *const OUT_NAME[4] = {"EMULATED SID", "ASID OVER USB-MIDI", "SID + ASID", "SID + MIDI CLOCK"};
+static const char *const OUT_TAG[4] = {"", "ASID", "BOTH", ""};   /* (the clock: CLK while it runs) */
 #define KEY_BASE 53                         /* MIDI note of the lowest key (F3) at octave 0 */
 #define KEY_OCT_MAX 3                       /* the keys' octaves either way: F0 .. G8, the SID's notes (C0 .. E0, under 21 Hz,
                                              * left out; above B7 the frequency register is at its top) */
@@ -76,6 +76,8 @@ static struct {
     uint32_t top_at, voices_at, filter_at, status_at;
     uint32_t top_sig;                       /* the remix state the top bar shows (redrawn when it moves) */
     uint8_t load_wait;                      /* an EV_LOAD is out; report its result */
+    uint8_t detecting;                      /* that load finds the tempo first (SID+CLK): the main loop waits in it */
+    uint8_t clk_saved;                      /* that load takes the song's kept clock (clkstore.c) */
     uint8_t ended;                          /* the song ran past its length */
     uint32_t lit_keys;
 } ui;
@@ -133,14 +135,33 @@ static void ui_hvsc_str(char *dst, const uint8_t *src, int max)   /* a 32-byte f
     dst[i] = 0;
 }
 
+static void draw_status(void);
+/* SID+CLK: the load that follows runs the tune ahead (1 to 3 s, the main loop inside it), so its
+ * message is drawn now, not on a later frame (the screen would stay black meanwhile) */
+static void ui_detect_note(void) { if (ui.detecting) draw_status(); }
+
+/* SID+CLK with a tempo found: the BPM it sends, x 10: the tune's, with the tempo (and the fader) */
+static uint32_t clk_bpm_x10(int fader)
+{
+    uint8_t r = eng_clk_ratio < ENG_CLK_RATIOS ? eng_clk_ratio : ENG_CLK_X1;
+    uint32_t b;
+    if (eng_follow) return eng_follow_bpm_x10;   /* following the clock coming in: its tempo */
+    b = (uint32_t)eng_clk_bpm_x10 * ENG_CLK_RATIO[r][0] / ENG_CLK_RATIO[r][1] * eng_tempo / 100u;
+    return fader ? b * (uint32_t)(1000 + eng_vinyl) / 1000u : b;
+}
+static int clk_bpm_shown(void) { return set.output == ENG_OUT_CLOCK && eng_clk_bpm_x10 && !eng_deck_off; }
+static void ui_bpm_text(char *b, uint32_t x10) { char d[2] = {(char)('0' + x10 % 10), 0}; ui_num(b, (int)(x10 / 10)); ui_cat(b, "."); ui_cat(b, d); }
+
 static void ui_say_output(void)             /* the output turned; an RSID never goes out as ASID */
 {
-    if (set.output && eng_loaded && eng_deck_off) ui_say("RSID: NO ASID, EMULATED SID ONLY", 0);
+    int shown = eng_loaded && (ui.mode == UI_PLAYER || ui.sel == ui.cur);   /* the song on screen is the one loaded */
+    if (set.output && shown && eng_deck_off) ui_say(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
+    else if (set.output == ENG_OUT_CLOCK && shown && eng_playing && !eng_clk_tried) ui_say("SID + MIDI CLOCK: FROM THE NEXT LOAD", 0);
     else ui_say("OUTPUT: ", OUT_NAME[set.output]);
 }
 
 /* ------------------------------------------------------------ loading --- */
-static int ui_load(int k, int subsong, int play)   /* play 0: loaded, ready for PLAY */
+static int ui_load(int k, int subsong, int play)   /* play 0: loaded, ready for PLAY; 2: the same song again, from the start */
 {
     uint32_t size = 0, i;
     const uint8_t *f = song_file(k, &size, 0, 0);
@@ -160,10 +181,15 @@ static int ui_load(int k, int subsong, int play)   /* play 0: loaded, ready for 
     ui.cur = k;
     memset(lane, 0, sizeof lane);           /* a new song starts clean: the held keys are let go */
     ui.ended = 0;
-    opts = (uint8_t)(set.model << 2 | (play ? 0 : ENG_LOAD_PAUSED));   /* the clock: always the file's */
+    opts = (uint8_t)(set.model << 2 | (play ? 0 : ENG_LOAD_PAUSED) | (play == 2 ? ENG_LOAD_AGAIN : 0));   /* the clock: always the file's */
+    ui.clk_saved = 0;
+    if (set.output == ENG_OUT_CLOCK && play && !sf.rsid && !(play == 2 && eng_clk_tried))
+        ui.clk_saved = (uint8_t)cs_preset(k, subsong);   /* the song's kept clock: no look */
     eng_file.pending = 1;
     eng_post(EV_LOAD, (uint8_t)subsong, opts, 0);
     ui.load_wait = 1;
+    ui.detecting = set.output == ENG_OUT_CLOCK && !sf.rsid && play && !(play == 2 && eng_clk_tried) && !ui.clk_saved;   /* (a paused load does not look; again keeps the last) */
+    if (ui.detecting) { ui_say("DETECTING TEMPO...", 0); ui_detect_note(); }   /* (the load runs the tune ahead first: 1 to 3 s) */
     ui.dirty_top = ui.dirty_list = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
     return 0;
 }
@@ -172,7 +198,7 @@ static int songs_play_request(int k, int subsong)   /* from the transfer tool */
 {
     if (ui_load(k, subsong, 1)) return 0;
     ui.sel = k;
-    if (ui.mode != UI_PLAYER) { ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); }
+    if (ui.mode != UI_PLAYER) { ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui_detect_note(); }
     return 1;
 }
 
@@ -234,6 +260,8 @@ static void ui_next_song(int d)             /* the player's SELECT: the next or 
 static void ui_init(void)
 {
     memset(&ui, 0, sizeof ui);
+    cs_init();
+    eng_clk_click = set.clk_click;
     ui.cur = -1;
     ui.voice_held = -1;
     memset(lane, 0, sizeof lane);
@@ -393,11 +421,30 @@ static void cc_flush(void)                 /* what came in goes on, the latest v
     if (any) { ui.dirty_status = ui.dirty_voices = ui.dirty_filter = 1; ui.activity = 1; }
 }
 
+static void ui_midi_start(void)            /* MIDI Start: the song on screen from its start, playing */
+{
+    int k = ui.mode == UI_PLAYER && ui.cur >= 0 ? ui.cur : ui.sel;
+    if (!song_count || k < 0) return;
+    if (k == ui.cur && eng_loaded) { if (ui_load(k, ui.subsong, 2)) return; }   /* (the tempo found kept) */
+    else if (ui_load(k, 0, 1)) return;
+    ui.sel = k;
+    if (ui.mode != UI_PLAYER) { ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui_detect_note(); }
+}
+
 static void ui_midi(void)                  /* the MIDI in queue (USB-MIDI packets: CIN, status, data 1, data 2) */
 {
     uint32_t pkt;
     while (plat_midi_in(&pkt)) {
-        int st = (int)(pkt >> 8 & 0xf0), ch = (int)(pkt >> 8 & 0x0f), d1 = (int)(pkt >> 16 & 0x7f), d2 = (int)(pkt >> 24 & 0x7f);
+        int st, ch, d1, d2;
+        if ((pkt & 0xfu) == 0xfu) {        /* real time: Start, Continue, Stop (the clock itself goes to the engine) */
+            uint32_t b = pkt >> 8 & 0xffu;
+            if (b == 0xFAu) ui_midi_start();
+            else if (b == 0xFBu && eng_loaded && !eng_playing && !ui.ended) eng_post(EV_PLAY, 0, 0, 0);
+            else if (b == 0xFCu && eng_playing) eng_post(EV_STOP, 0, 0, 0);
+            ui.dirty_top = 1;
+            continue;
+        }
+        st = (int)(pkt >> 8 & 0xf0); ch = (int)(pkt >> 8 & 0x0f); d1 = (int)(pkt >> 16 & 0x7f); d2 = (int)(pkt >> 24 & 0x7f);
         if (st == MIDI_NOTE_ON && d2) note_on(ch, d1);
         else if (st == MIDI_NOTE_OFF || st == MIDI_NOTE_ON) note_off(ch, d1);   /* velocity 0: off */
         else if (st == MIDI_CC && (d1 == MIDI_CC_ALL_SOUND_OFF || d1 == MIDI_CC_ALL_NOTES_OFF)) note_off(ch, -1);
@@ -485,21 +532,33 @@ static void ui_octave_btn(uint32_t pressed, uint32_t released, uint32_t held)
     if (!(held & both)) ui.both_reset = 0;
 }
 
+/* SID+CLK, a song loaded paused (browsing, a subsong) that has not looked for its tempo: PLAY loads
+ * it again to look, from its start (it has not moved yet) */
+static int ui_needs_tempo(void) { return set.output == ENG_OUT_CLOCK && eng_loaded && !eng_playing && !eng_clk_tried && !eng_deck_off && ui.cur >= 0; }
+
 static void ui_play_btn(uint32_t held)
 {
+    if (ui.mode == UI_PLAYER && (held & (1u << B_GLO))) {   /* GLO + PLAY: the clock's beats as clicks, on / off */
+        set.clk_click = (uint8_t)!set.clk_click;
+        eng_clk_click = set.clk_click;
+        ui_say("CLOCK CLICK: ", set.clk_click ? (set.output == ENG_OUT_CLOCK ? "ON" : "ON (WITH SID+CLK)") : "OFF");
+        return;
+    }
     if (ui.mode == UI_SONGS) {
         if (!song_count) { ui_say("NO SONGS YET: SEE ABOVE", 0); return; }
-        if (ui.sel == ui.cur && eng_loaded && !eng_playing && !ui.ended) eng_post(EV_PLAY, 0, 0, 0);   /* loaded and waiting (its subsong kept) */
-        else if (ui_load(ui.sel, 0, 1)) return;
+        if (ui.sel == ui.cur && eng_loaded && !eng_playing && !ui.ended && !ui_needs_tempo()) eng_post(EV_PLAY, 0, 0, 0);   /* loaded and waiting (its subsong kept) */
+        else if (ui_load(ui.sel, ui.sel == ui.cur && ui_needs_tempo() ? ui.subsong : 0, 1)) return;
         ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui.dirty_top = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
+        ui_detect_note();
         return;
     }
     if ((held & (1u << B_REC)) || ui.ended) {   /* REC + PLAY, or PLAY after the end: from the start */
-        if (ui.cur >= 0) ui_load(ui.cur, ui.subsong, 1);
+        if (ui.cur >= 0) ui_load(ui.cur, ui.subsong, 2);
         return;
     }
     if (!eng_loaded) { if (song_count) ui_load(ui.sel, 0, 1); return; }
     if (eng_playing) eng_post(EV_STOP, 0, 0, 0);
+    else if (ui_needs_tempo()) ui_load(ui.cur, ui.subsong, 1);
     else eng_post(EV_PLAY, 0, 0, 0);
     ui.dirty_top = 1;
 }
@@ -535,6 +594,57 @@ static void ui_rx_knob(int k, int32_t d, int enc)
             ui_say(eng_usb4 ? "LIMIT 100 %: USB MIX + VOICES" : "LIMIT 150 %: TEMPO X PITCH", 0);
             break;
         }
+        if (k == 2) {                       /* SID+CLK: the clock's offset, ms (kept with the song): not the remix */
+            int o = (int)eng_clk_offset_ms + d * (fast ? 25 : 5);
+            char b2[24] = "CLOCK OFFSET: ";
+            if (!clk_bpm_shown()) { ui_say(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 3: THE MIDI CLOCK (SID+CLK)", 0); break; }
+            o = o < -ENG_CLK_OFFSET_MAX ? -ENG_CLK_OFFSET_MAX : o > ENG_CLK_OFFSET_MAX ? ENG_CLK_OFFSET_MAX : o;
+            eng_post(EV_CLOCK_OFFSET, 0, 0, (uint32_t)o);
+            eng_clk_offset_ms = (int16_t)o;
+            cs_remember(ui.cur, ui.subsong);
+            if (o > 0) ui_cat(b2, "+");
+            ui_num(b2 + ui_strlen(b2), o); ui_cat(b2, " MS");
+            ui_say(b2, 0);
+            break;
+        }
+        if (k == 3 && set.output == ENG_OUT_CLOCK && !eng_deck_off && eng_loaded && ui.cur >= 0 &&
+            (eng_clk_manual || (eng_clk_tried && !eng_clk_on))) {   /* no tempo found: one set by hand, a step a
+                                                         * player call more or less a beat (3 fast): the tempos
+                                                         * the tune can have */
+            int cm = (int)eng_calls_min_x10, b = 0, n;
+            char b2[32] = "MIDI CLOCK: ";
+            if (cm <= 0) break;
+            if (eng_clk_manual && eng_clk_bpm_x10) {
+                n = (cm + eng_clk_bpm_x10 / 2) / eng_clk_bpm_x10 - d * (fast ? 3 : 1);
+                if (n < 1) n = 1;
+                while (cm / n > ENG_CLK_MANUAL_MAX) n++;
+                b = cm / n;
+            } else if (d > 0) b = cm / ((cm + 600) / 1200);   /* (the first: about 120) */
+            if (!b && !eng_clk_manual) { ui_say("MIDI CLOCK: OFF (TURN UP TO SET ONE)", 0); break; }
+            if (b < ENG_CLK_MANUAL_MIN) b = 0;   /* below: none (forgotten) */
+            eng_post(EV_CLOCK_MANUAL, 0, 0, (uint32_t)b);
+            eng_clk_bpm_x10 = (uint16_t)b;  /* (shown at once) */
+            eng_clk_manual = b != 0;
+            eng_clk_on = b != 0;            /* (the next turn's branch, before the engine has it) */
+            eng_clk_ratio = ENG_CLK_X1;
+            cs_remember(ui.cur, ui.subsong);
+            if (b) { ui_bpm_text(b2 + ui_strlen(b2), (uint32_t)b); ui_cat(b2, " BPM, SET"); }
+            else ui_cat(b2, "OFF");
+            ui_say(b2, 0);
+            break;
+        }
+        if (k == 3) {                       /* SID+CLK: the clock's tempo put right (half, double ...): not the remix */
+            int r = (int)eng_clk_ratio + (d > 0 ? 1 : -1);
+            char b2[24] = "MIDI CLOCK: ";
+            if (!clk_bpm_shown()) { ui_say(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 4: THE MIDI CLOCK (SID+CLK)", 0); break; }
+            if (r < 0 || r >= ENG_CLK_RATIOS) break;
+            eng_post(EV_CLOCK_RATIO, (uint8_t)r, 0, 0);
+            eng_clk_ratio = (uint8_t)r;    /* (shown at once; the engine takes it from the clock's next beat) */
+            cs_remember(ui.cur, ui.subsong);   /* (kept with the song) */
+            ui_bpm_text(b2 + ui_strlen(b2), clk_bpm_x10(0)); ui_cat(b2, " BPM");
+            ui_say(b2, 0);
+            break;
+        }
         if (k == 0) eng_post(EV_RX, RX_P_TEMPO, 0, (uint32_t)(d * (fast ? 5 : 1)));
         else if (k == 1) eng_post(EV_RX, RX_P_VINYL, 0, (uint32_t)(d * (fast ? 5 : 1)));
         break;
@@ -551,8 +661,8 @@ static void ui_songs_knob(int k, int32_t d)
         set.model = (uint8_t)(((int)set.model + (d > 0 ? 1 : -1) + 3) % 3);
         eng_post(EV_MODEL, set.model, 0, 0);
         ui_say("CHIP: ", set.model == 0 ? "THE FILE'S" : set.model == 1 ? "6581" : "8580");
-    } else if (k == 1) {                    /* the output: the emulated SID, ASID, both */
-        set.output = (uint8_t)(((int)set.output + (d > 0 ? 1 : -1) + 3) % 3);
+    } else if (k == 1) {                    /* the output: the emulated SID, ASID, both, the SID and a MIDI clock */
+        set.output = (uint8_t)(((int)set.output + (d > 0 ? 1 : -1) + 4) % 4);
         eng_post(EV_OUTPUT, set.output, 0, 0);
         ui_say_output();
     } else if (k == 2) {                    /* USB audio: the mix, or the mix and the voices (tempo <= 100 %) */
@@ -645,7 +755,7 @@ static void ui_input(void)
         ui_load(ui.cur, s, 0);              /* ready for PLAY */
     }
     if ((d = ui_enc(EN_ALGO)) != 0 && ui.mode == UI_PLAYER) {   /* (SONGS: KNOB 2) */
-        set.output = (uint8_t)(((int)set.output + (d > 0 ? 1 : -1) + 3) % 3);
+        set.output = (uint8_t)(((int)set.output + (d > 0 ? 1 : -1) + 4) % 4);
         eng_post(EV_OUTPUT, set.output, 0, 0);
         ui_say_output();
         ui.dirty_status = 1;
@@ -712,7 +822,8 @@ static int deck_on(void) { return !eng_deck_off && (eng_tempo != 100 || eng_viny
 static int remixed(void) { return voice_remixed(0) || voice_remixed(1) || voice_remixed(2) || filter_remixed() || deck_on(); }
 static uint32_t remix_sig(void)             /* what the top bar shows of it */
 {
-    return (uint32_t)remixed() | (uint32_t)deck_on() << 1 | (uint32_t)eng_tempo << 2 | (uint32_t)(uint8_t)eng_vinyl << 10;
+    return (uint32_t)remixed() | (uint32_t)deck_on() << 1 | (uint32_t)eng_tempo << 2 | (uint32_t)(uint8_t)eng_vinyl << 10 |
+           (uint32_t)(clk_bpm_shown() ? 1u : 0u) << 18 | (uint32_t)eng_clk_ratio << 19 | (uint32_t)(eng_clk_bpm_x10 & 0x3FFu) << 22;
 }
 
 static void draw_logo_small(int x, int y, int cell);   /* (with the intro's logo, below) */
@@ -757,9 +868,16 @@ static void draw_top(void)                  /* rows 0 .. 35 */
         tx = nx - 7 - TRANSPORT_W;
         ui.top_sig = remix_sig();
         {
-            int32_t lim = tx - 12;
+            int32_t lim = tx - 12, left = tx;   /* left: what is already drawn left of the transport */
+            if (clk_bpm_shown() && eng_loaded) {   /* SID+CLK: the BPM the clock sends, left of the transport */
+                char bb[12];
+                ui_bpm_text(bb, clk_bpm_x10(1));
+                left = tx - 4 - text_w(&FONT_XS, bb);
+                cv_text(left, 4, &FONT_XS, bb, deck_on() ? C_RMX : C_WHITE);
+                lim = left - 8;
+            }
             if (ui.top_sig & 1u) {          /* remixed: REMIX, white, until OCT- + OCT+ put it back */
-                int32_t w = text_w(&FONT_XS, "REMIX"), rx0 = tx - 8 - w;
+                int32_t w = text_w(&FONT_XS, "REMIX"), rx0 = left - 8 - w;
                 cv_rect(rx0 - 3, 3, w + 6, 13, C_RMX);   /* (the letters: rows 5 .. 13, as the symbol) */
                 cv_text(rx0, 2, &FONT_XS, "REMIX", C_BLACK);
                 lim = rx0 - 3 - 8;
@@ -780,7 +898,7 @@ static void draw_top(void)                  /* rows 0 .. 35 */
             rx0 = 240 - 6 - text_w(&FONT_XS, t);
             cv_text(rx0, 20, &FONT_XS, t, eng_playing ? C_WHITE : C_GRAY);
             if (set.output && !eng_deck_off) {   /* ASID or BOTH, left of the time (an RSID: neither) */
-                const char *o = OUT_TAG[set.output < 3 ? set.output : 0];
+                const char *o = set.output == ENG_OUT_CLOCK ? (eng_clk_on ? "CLK" : "") : OUT_TAG[set.output < 4 ? set.output : 0];
                 rx0 -= 6 + text_w(&FONT_XS, o);
                 cv_text(rx0, 20, &FONT_XS, o, C_AMB);
             }
@@ -1260,10 +1378,10 @@ static void draw_status(void)               /* rows 216 .. 239 */
             const uint8_t *f = song_count ? song_file(ui.sel, &size, 0, 0) : 0;
             sidfile_t sf;
             int is8580 = f && sidfile_parse(&sf, f, size) == 0 && sidfile_model(&sf, 0) == SID_MODEL_8580;
-            px = st_kfield(px, 1, "SID", is8580 ? "8580" : "6581", C_GRAY) - 2;
+            px = st_kfield(px, 1, 0, is8580 ? "8580" : "6581", C_GRAY) - 2;   /* (the chip needs no label) */
             px = cv_text(px, 6, &FONT_XS, "AUTO", C_DIM) + 11;
-        } else px = st_kfield(px, 1, "SID", set.model == 1 ? "6581" : "8580", C_GRAY) + 6;
-        px = st_kfield(px, 2, "OUT", set.output == 0 ? "EMU" : set.output == 1 ? "ASID" : "BOTH", C_GRAY) + 6;
+        } else px = st_kfield(px, 1, 0, set.model == 1 ? "6581" : "8580", C_GRAY) + 6;
+        px = st_kfield(px, 2, "OUT", set.output == 0 ? "EMU" : set.output == 1 ? "ASID" : set.output == 2 ? "BOTH" : "SID+CLK", C_GRAY) + 6;
         st_kfield(px, 3, "USB", set.usb4 ? "5CH" : "MIX", C_GRAY);
     } else {
         const rx_voice_t *x = &rx.v[ui.voice];
@@ -1305,11 +1423,19 @@ static void draw_status(void)               /* rows 216 .. 239 */
             px = st_field(px, 0, "RSID: 100%, NO FADER", C_DIM);
         } else if (ui.page == PG_GLO) {
             int v = eng_vinyl, a = v < 0 ? -v : v;
+            int clk = clk_bpm_shown();      /* SID+CLK: the clock's offset and BPM too (the labels go, for room) */
             ui_num(t, eng_tempo); ui_cat(t, "%");
-            px = st_kfield(px, 1, "TEMPO", t, eng_tempo != 100 ? C_RMX : C_GRAY);
+            px = st_kfield(px, 1, clk ? 0 : "TEMPO", t, eng_tempo != 100 ? C_RMX : C_GRAY);
             t[0] = v < 0 ? '-' : '+'; t[1] = 0; ui_num(t + 1, a / 10); ui_cat(t, ".");
             { char dd[2] = {(char)('0' + a % 10), 0}; ui_cat(t, dd); } ui_cat(t, "%");
-            px = st_kfield(px, 2, "PITCH", t, v ? C_RMX : C_GRAY);
+            px = st_kfield(px, 2, clk ? 0 : "PITCH", t, v ? C_RMX : C_GRAY);
+            if (clk) {                      /* grey: not the remix; the BPM whole (the top bar has the tenth) */
+                t[0] = 0; if (eng_clk_offset_ms > 0) ui_cat(t, "+");
+                ui_num(t + ui_strlen(t), eng_clk_offset_ms); ui_cat(t, "MS");
+                px = st_kfield(px, 3, 0, t, C_GRAY);
+                ui_num(t, (int)((clk_bpm_x10(0) + 5) / 10)); ui_cat(t, "BPM");
+                px = st_kfield(px, 4, 0, t, C_GRAY);
+            }
         } else {
             ui_cut_text(t); px = st_kfield(px, 1, "CUT", t, ui_cut_changed() ? C_RMX : C_GRAY);
             t[0] = 0; if (rx.res_off >= 0) ui_cat(t, "+"); ui_num(t + ui_strlen(t), rx.res_off);
@@ -1324,7 +1450,7 @@ static void ui_leds(void)
 {
     uint32_t b = 0, k = 0;
     int i, l;
-    if (eng_playing) b |= 1u << B_PLAY;
+    if (eng_playing && !(eng_clk_on && eng_clk_pulses % 24u >= 6u)) b |= 1u << B_PLAY;   /* the clock: the beat's first quarter */
     if (ui.mode == UI_PLAYER) {
         uint32_t held = plat_buttons();
         b |= 1u << VOICE_BTN[ui.voice];
@@ -1490,6 +1616,7 @@ static void intro_end(void)
 
 static void ui_frame(void)                  /* ~60 times a second */
 {
+    cs_service();                           /* (the kept clocks, when quiet) */
     uint32_t now = plat_ms();
     ui_input();
     if (ui.intro) {
@@ -1504,7 +1631,16 @@ static void ui_frame(void)                  /* ~60 times a second */
     ui.activity = 0;
     if (ui.load_wait && !eng_file.pending) {
         ui.load_wait = 0;
-        if (!eng_load_rc && set.output && eng_deck_off) ui_say("RSID: NO ASID, EMULATED SID ONLY", 0);
+        ui.detecting = 0;
+        if (!eng_load_rc && set.output && eng_deck_off) ui_say(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
+        else if (!eng_load_rc && set.output == ENG_OUT_CLOCK && eng_clk_tried) {   /* the beat the load found (a paused
+                                             * load looks at its first PLAY) */
+            char b[36] = "MIDI CLOCK: ";
+            if (eng_clk_bpm_x10) {
+                ui_bpm_text(b + ui_strlen(b), clk_bpm_x10(0)); ui_cat(b, ui.clk_saved ? " BPM, KEPT" : " BPM"); ui_say(b, 0);
+                if (!eng_clk_manual) cs_found(ui.cur, ui.subsong);   /* (its next load: no look) */
+            } else ui_say("NO TEMPO FOUND: SET ONE WITH GLO K4", 0);
+        }
         if (eng_load_rc) { ui.cur = -1; ui_say(eng_load_rc == -5 ? "BASIC TUNE: NOT SUPPORTED" : eng_load_rc == -6 ? "2SID / 3SID TUNE: NOT SUPPORTED" : "CANNOT PLAY THIS FILE", 0); }
         ui.dirty_top = ui.dirty_list = 1;
     }

@@ -180,5 +180,6 @@ static int songs_play_request(int k, int subsong);
 #include "app/songs.c"
 #include "app/panel.c"
 #include "app/plat_fm1.c"
+#include "app/clkstore.c"
 #include "app/ui.c"
 #include "app/main_fm1.c"

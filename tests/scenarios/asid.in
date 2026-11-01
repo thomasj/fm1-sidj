@@ -1,4 +1,4 @@
-# ASID over USB-MIDI: ALGORITHM (KNOB 2 in SONGS) picks the output; ASID only is silent here
+# ASID over USB-MIDI: ALGORITHM (KNOB 2 in SONGS) picks the output (SID, ASID, BOTH, SID+CLK); ASID only is silent here
 # (the emulation still runs, for the scopes), SID + ASID is not; a pause sends the volume at 0 and 0x4D, at which the receiver here resets its chips (as
 # the SidStation and TherapSID do), so a resume must send every register again;
 # a new song (SELECT: it waits for PLAY) sends the chip type, and on PLAY the whole image
@@ -55,6 +55,8 @@ expect asid_seen0 25
 tap PLAY
 expect asid_vol_at_stop 0
 turn ALGO 1
-expect output 0
+expect output 3
 expect asid_stops >2
+turn ALGO 1
+expect output 0
 expect asid_bad 0

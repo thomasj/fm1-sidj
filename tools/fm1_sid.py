@@ -9,7 +9,7 @@
   tools/fm1_sid.py play N [SUBSONG]
   tools/fm1_sid.py compact                              (fetch everything live, wipe the pool, send it back)
   tools/fm1_sid.py wipe                                 (erase the whole pool)
-  tools/fm1_sid.py output 0|1|2                         (the output: SID, ASID, both; not saved)
+  tools/fm1_sid.py output 0|1|2|3                       (the output: SID, ASID, both, SID and MIDI clock; not saved)
   tools/fm1_sid.py stats [SECONDS]                      (the audio load: mean and worst half buffer, once a second)
   tools/fm1_sid.py usb 0|1                              (USB audio: the mix, or the mix and the voices; not saved)
   tools/fm1_sid.py rx PARAM [VOICE] [VALUE]             (a remix event, as the panel sends it: tempo 0 100 is +100 %,
@@ -269,7 +269,7 @@ def main():
     p = sub.add_parser("play"); p.add_argument("n", type=int); p.add_argument("subsong", type=int, nargs="?", default=0)
     sub.add_parser("compact")
     sub.add_parser("wipe")
-    p = sub.add_parser("output"); p.add_argument("mode", type=int, choices=[0, 1, 2])
+    p = sub.add_parser("output"); p.add_argument("mode", type=int, choices=[0, 1, 2, 3])
     p = sub.add_parser("stats"); p.add_argument("seconds", type=int, nargs="?", default=5)
     p = sub.add_parser("usb"); p.add_argument("mode", type=int, choices=[0, 1])
     p = sub.add_parser("rx"); p.add_argument("param"); p.add_argument("voice", type=int, nargs="?", default=0)
@@ -315,7 +315,7 @@ def main():
             r = dev.ask(STATS)
             mean, peak = r[0] | r[1] << 8, r[2] | r[3] << 8
             xruns, frames = struct.unpack("<I", r[4:8])[0], struct.unpack("<I", r[12:16])[0]
-            print(f"  load {mean / 10:5.1f} % mean, {peak / 10:5.1f} % peak   output {['SID', 'ASID', 'BOTH'][r[8]]}  "
+            print(f"  load {mean / 10:5.1f} % mean, {peak / 10:5.1f} % peak   output {['SID', 'ASID', 'BOTH', 'SID+CLK'][r[8]] if r[8] < 4 else r[8]}  "
                   f"{'playing' if r[9] else 'stopped'}  {r[11]} SID  frame {frames}  xruns {xruns}")
             if len(r) >= 37:                                # USB audio, firmware with it
                 pk, un, ov, mi, st = struct.unpack("<5I", r[17:37])
@@ -329,6 +329,8 @@ def main():
                 print(f"        clock {'NTSC' if r[51] else 'PAL'}  tempo {r[53]} %  pitch {vin / 10:+.1f} %")
             if len(r) >= 57 and (r[55] or r[56]):           # the supplies set at boot
                 print(f"        supplies VDC14 {1.25 + 0.05 * r[55]:.2f} V (level {r[55]})  SYSVDD {0.93 + 0.03 * r[56]:.2f} V (level {r[56]})")
+            if len(r) >= 58:                                # the system clock, after M-VAVE's boot loader
+                print(f"        clock   360 MHz{' (raised from 320: V16 boot loader)' if r[57] else ''}")
     elif a.cmd == "wipe":
         if dev.ask(WIPE, b"WIPE", timeout=60.0)[0]:
             raise SystemExit("wipe failed")

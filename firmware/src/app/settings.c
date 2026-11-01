@@ -9,11 +9,12 @@ typedef struct {
     uint8_t theme_unused;                   /* was the theme (now always DEBUT) */
     uint8_t model;                          /* chip override: 0 the file's, 1 6581, 2 8580 */
     uint8_t clock_unused;                   /* was the clock override (now always the file's) */
-    uint8_t output;                         /* 0 emulated, 1 ASID over USB-MIDI, 2 both */
+    uint8_t output;                         /* 0 emulated, 1 ASID over USB-MIDI, 2 both, 3 emulated and a MIDI clock */
     uint16_t song;                          /* the entry to select at boot */
     uint8_t usb4;                           /* USB audio: 0 the mix (L R), 1 the mix and the three voices
                                              * (five channels; the tempo then caps at 100 %) */
-    uint8_t rsv[5];
+    uint8_t clk_click;                      /* the MIDI clock's beats as clicks in the output (GLO + PLAY) */
+    uint8_t rsv[4];
 } settings_t;
 
 static settings_t set;
@@ -34,8 +35,9 @@ static int settings_load(void)             /* 0 = loaded; else the defaults are 
         return -1;
     set = s;
     if (set.model > 2) set.model = 0;
-    if (set.output > 2) set.output = 0;
+    if (set.output > 3) set.output = 0;
     if (set.usb4 > 1) set.usb4 = 0;
+    if (set.clk_click > 1) set.clk_click = 0;
     return 0;
 }
 

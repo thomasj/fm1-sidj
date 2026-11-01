@@ -1,0 +1,45 @@
+# A MIDI clock coming in: Start plays the song on screen from its start, Stop pauses, Continue goes
+# on. With SID+CLK and a beat found, the tune follows the clock: Commando (125 BPM) at 120 and then
+# 140, its beats within a millisecond of the clock's; SiDJ sends no clock of its own meanwhile.
+# Without SID+CLK, Start and Stop only, at the tune's own tempo.
+sid @SID1@
+midi fa 0 0
+wait 500
+expect mode 1
+expect playing 1
+expect follow 0
+midi fc 0 0
+wait 500
+expect playing 0
+tap SEQ
+expect mode 0
+turn K2 3
+expect output 3
+clockin 120
+wait 300
+midi fa 0 0
+wait 4500
+expect playing 1
+expect clk_on 1
+expect follow 1
+expect follow_bpm >1198
+expect follow_bpm <1202
+wait 2000
+expect follow_err <20
+midi fc 0 0
+wait 500
+expect playing 0
+midi fb 0 0
+wait 3000
+expect playing 1
+expect follow_err <20
+clockin 140
+wait 3000
+expect follow_bpm >1398
+expect follow_bpm <1402
+expect follow_err <20
+expect clk_starts 0
+expect clk_pulses 0
+clockin 0
+wait 1000
+expect follow 0

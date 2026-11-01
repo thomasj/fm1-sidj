@@ -334,7 +334,8 @@ static void songs_service(void)
                                                              * loaded, SIDs, frames (4); USB audio: streaming (1), packets,
                                                              * underruns, overruns, missed, stalls (4 each); MASTER: lowest, highest
                                                              * reading (2 each), jumps, reads (4 each), gain (2); the C64's clock
-                                                             * (1 NTSC), 0, tempo, vinyl (signed); the windows restart */
+                                                             * (1 NTSC), 0, tempo, vinyl (signed); VDC14, SYSVDD; 1 if the clock was raised
+                                                             * from V16's boot loader's 320 MHz; the windows restart */
         uint32_t mean, peak, ua[6], ms[5], i;
         plat_cpu_stats(&mean, &peak);
         out[0] = (uint8_t)mean; out[1] = (uint8_t)(mean >> 8); out[2] = (uint8_t)peak; out[3] = (uint8_t)(peak >> 8);
@@ -349,12 +350,12 @@ static void songs_service(void)
         wr32(out + 41, ms[2]); wr32(out + 45, ms[3]);
         out[49] = (uint8_t)ms[4]; out[50] = (uint8_t)(ms[4] >> 8);
         out[51] = eng_ntsc; out[52] = 0; out[53] = eng_tempo; out[54] = (uint8_t)eng_vinyl;
-        plat_supplies(out + 55);            /* VDC14, SYSVDD levels */
-        sx_reply(0x40 | SX_STATS, out, 57);
+        plat_supplies(out + 55);            /* VDC14, SYSVDD levels; the clock raised from V16's 320 MHz */
+        sx_reply(0x40 | SX_STATS, out, 58);
         break;
     }
-    case SX_OUTPUT:                                         /* mode (0 SID, 1 ASID, 2 both) -> status; not saved */
-        if (d >= 1 && sx_dec[0] <= 2) { set.output = sx_dec[0]; eng_post(EV_OUTPUT, sx_dec[0], 0, 0); out[0] = 0; }
+    case SX_OUTPUT:                                         /* mode (0 SID, 1 ASID, 2 both, 3 SID and MIDI clock) -> status; not saved */
+        if (d >= 1 && sx_dec[0] <= 3) { set.output = sx_dec[0]; eng_post(EV_OUTPUT, sx_dec[0], 0, 0); out[0] = 0; }
         else out[0] = 1;
         sx_reply(0x40 | SX_OUTPUT, out, 1);
         break;

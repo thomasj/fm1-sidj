@@ -24,6 +24,7 @@
  *   poolwrite OFF LEN BYTE       LEN bytes of the pool from OFF set to BYTE, as another firmware's
  *                                image writes over it (no erase; OFF from the pool's start; 0x.. hex)
  *   wav FILE | wavstop           start / stop recording the output
+ *   clicks FILE                  the MIDI clock's beats so far, as frames of the recording
  *   asid FILE                    keep the raw MIDI out stream (the ASID SysEx) in FILE
  *   shot FILE.png                save the screen
  *   leds                         print the lit buttons and keys
@@ -35,10 +36,15 @@
  *                                lfopwV, lfocentsV, lfoabsV; lfocut, lfocutabs, tempo, vinyl, dframes
  *                                and dscope (the frames, the scopes' samples since `mark`); the remix: keymode, cutmode, scale, cutoff_off,
  *                                route, tuneroute, routexor, fmode, tunefmode, fmodexor, fmodeovr,
- *                                fmodeval, res; the output:
+ *                                fmodeval, res; the MIDI clock: clk_pulses, clk_starts, clk_stops, clk_conts,
+ *                                clk_on, clk_first_ms, clk_bpm (x10), clk_tried, clk_ratio, clk_offset, clk_click,
+ *                                clk_kept, kept, clk_manual, dpulses (since mark); the clock coming in: follow,
+ *                                follow_bpm (x10), follow_err (0.1 ms); the output:
  *                                output, asid_msgs, asid_starts, asid_stops, asid_types, asid_bad,
  *                                asid_double, asid_vol_at_stop, asid_diffC, asid_seenC (chip C)
  *                                (VALUE may be <N or >N); exit 1 on a mismatch
+ *   clockin BPM [JITTER]         a MIDI clock comes in at BPM (0: stops), each pulse up to JITTER ms late (as
+ *                                USB frames make it); a new BPM from the next pulse on; `midi fa` / fc / fb: Start, Stop, Continue
  *   peakreset                    forget the peak
  *   mark                         remember the frame count and the scopes' (expect dframes, dscope)
  *   reboot                       re-run boot from the simulated flash (persistence test)
@@ -137,14 +143,52 @@ static void asid_sysex(const uint8_t *m, int n)
     if (di != n - 1) asid_bad++;
     asid_msgs++;
 }
+static uint32_t clk_pulses, clk_starts, clk_stops, clk_conts, clk_first_ms, clk_last_pulse_ms, clk_gap_ms;
+static uint32_t mark_pulses;
 void plat_midi_out(uint32_t pkt)
 {
     int cin = (int)(pkt & 0xf), k = cin == 4 || cin == 7 ? 3 : cin == 6 ? 2 : cin == 5 ? 1 : 0, i;
+    if (cin == 0xF) {                       /* real time: the MIDI clock */
+        uint8_t b = (uint8_t)(pkt >> 8);
+        if (b == 0xF8) { if (!clk_pulses++) clk_first_ms = now_ms; clk_gap_ms = now_ms - clk_last_pulse_ms; clk_last_pulse_ms = now_ms; }
+        else if (b == 0xFA) clk_starts++;
+        else if (b == 0xFC) clk_stops++;
+        else if (b == 0xFB) clk_conts++;
+        return;
+    }
     if (!k) return;
     for (i = 0; i < k && sx_n < (int)sizeof sx_buf; i++) sx_buf[sx_n++] = (uint8_t)(pkt >> (8 + 8 * i));
     if (cin != 4) { asid_sysex(sx_buf, sx_n); sx_n = 0; }
 }
 int plat_midi_out_free(void) { return 256; }
+void plat_midi_out_msg(const uint32_t *pkt, int n) { int i; for (i = 0; i < n; i++) plat_midi_out(pkt[i]); }
+void plat_keepalive(void) {}
+static uint32_t wav_frames, host_frames;
+/* the MIDI clock coming in (`clockin BPM`): pulses timed in ticks, numbered as usb.c does */
+static uint32_t ci_t[32], ci_k[32], ci_w, ci_r, ci_n;
+static uint8_t ci_stopped;
+static double clkin_bpm, clkin_next_ms, clkin_jitter;
+static void clock_in(uint32_t b, uint32_t t)
+{
+    uint32_t k;
+    if (b == 0xFB) { ci_stopped = 0; return; }
+    if (b == 0xFC) { ci_stopped = 1; k = PLAT_CLK_STOP; }
+    else if (b == 0xFA) { ci_n = 0; ci_stopped = 0; k = PLAT_CLK_START; }
+    else if (b != 0xF8) return;
+    else k = ci_stopped ? PLAT_CLK_FREE : ci_n++;
+    if (ci_w - ci_r < 32u) { ci_t[ci_w % 32u] = t; ci_k[ci_w % 32u] = k; ci_w++; }
+    else { ci_t[(ci_w - 1u) % 32u] = t; ci_k[(ci_w - 1u) % 32u] = k; }
+}
+int plat_clock_in(uint32_t *t, uint32_t *k) { if (ci_r == ci_w) return 0; *t = ci_t[ci_r % 32u]; *k = ci_k[ci_r % 32u]; ci_r++; return 1; }
+uint32_t plat_ticks(void) { return now_ms * (PLAT_TICKS_HZ / 1000u); }
+uint32_t plat_frame_ticks(uint32_t frame) { return (uint32_t)((uint64_t)(host_frames + frame) * PLAT_TICKS_HZ / 44100u); }
+static uint32_t rt_beats[4096], rt_nbeats, rt_pulse;      /* `clicks FILE`: each beat's frame in the recording */
+void plat_midi_rt(uint8_t b, uint32_t frame)              /* (sent at once here; the beats noted where they play) */
+{
+    if (b == 0xFA) rt_pulse = 0;
+    if (b == 0xF8) { if (rt_pulse % 24u == 0 && rt_nbeats < 4096) rt_beats[rt_nbeats++] = wav_frames + frame; rt_pulse++; }
+    plat_midi_out(0x0Fu | (uint32_t)b << 8);
+}
 static int asid_diff(int chip)             /* registers of the ASID image that differ from the chip's */
 {
     int i, d = 0;
@@ -180,7 +224,7 @@ void plat_master_stats(uint32_t s[5]) { int i; for (i = 0; i < 5; i++) s[i] = 0;
 static int usb_wide;
 void plat_usb_audio_mode(int wide) { usb_wide = wide; }
 void plat_cpu_stats(uint32_t *mean_x10, uint32_t *peak_x10) { *mean_x10 = *peak_x10 = cpu_pct * 10u; }
-void plat_supplies(uint8_t s[2]) { s[0] = s[1] = 0; }
+void plat_supplies(uint8_t s[3]) { s[0] = s[1] = s[2] = 0; }
 void plat_stop_for_flash(void) { eng_post(EV_STOP, 0, 0, 0); }   /* (no flash here: nothing to wait for) */
 
 /* the song pool: 240 KB of simulated flash */
@@ -207,11 +251,11 @@ static int ota_wire_send(const uint8_t *p, uint32_t n)
 static void songs_changed(void);
 static int songs_play_request(int k, int subsong);
 #include "../firmware/src/app/songs.c"
+#include "../firmware/src/app/clkstore.c"
 #include "../firmware/src/app/ui.c"
 
 /* ---------------------------------------------------------- outputs --- */
 static FILE *wav;
-static uint32_t wav_frames;
 static float peak_out;
 static uint32_t mark_frames, mark_scope;
 #ifndef SIDJ_WEB
@@ -267,7 +311,7 @@ static void png_write(const char *path)
     fclose(f);
 }
 
-static void wav_open(const char *path) { static const uint8_t h[44] = {0}; wav = fopen(path, "wb"); if (wav) fwrite(h, 1, 44, wav); wav_frames = 0; }
+static void wav_open(const char *path) { static const uint8_t h[44] = {0}; wav = fopen(path, "wb"); if (wav) fwrite(h, 1, 44, wav); wav_frames = 0; rt_nbeats = 0; }
 static void wav_close(void)
 {
     uint32_t bytes = wav_frames * 4, v;
@@ -305,10 +349,16 @@ static void run_ms(uint32_t ms)
     uint32_t i;
     for (i = 0; i < ms; i++) {
         now_ms++;
+        while (clkin_bpm > 0 && clkin_next_ms <= (double)now_ms) {   /* the clock coming in */
+            double j = clkin_jitter * (double)rand() / RAND_MAX;   /* (late, never early: as it arrives) */
+            clock_in(0xF8, (uint32_t)((clkin_next_ms + j) * (PLAT_TICKS_HZ / 1000u)));
+            clkin_next_ms += 60000.0 / (clkin_bpm * 24.0);
+        }
         while (audio_due_ms <= (double)now_ms) {
             double t0 = now_ns(), dt;
             uint32_t k;
             eng_render(blk, 256, master);
+            host_frames += 256;
             dt = now_ns() - t0;
             render_ns_total += dt;
             render_budget_ns_total += 256.0 * 1e9 / 44100.0;
@@ -366,6 +416,27 @@ static int expect(const char *what, const char *val)
     else if (!strcmp(what, "frames")) have = (long)c64.frames;
     else if (!strcmp(what, "elapsed")) have = (long)eng_elapsed_ds();
     else if (!strcmp(what, "songs")) have = song_count;
+    else if (!strcmp(what, "clk_pulses")) have = (long)clk_pulses;      /* the MIDI clock out: F8 */
+    else if (!strcmp(what, "clk_starts")) have = (long)clk_starts;      /* FA */
+    else if (!strcmp(what, "clk_stops")) have = (long)clk_stops;        /* FC */
+    else if (!strcmp(what, "clk_conts")) have = (long)clk_conts;        /* FB */
+    else if (!strcmp(what, "clk_on")) have = eng_clk_on;
+    else if (!strcmp(what, "clk_first_ms")) have = (long)clk_first_ms;  /* the first pulse, ms since the boot */
+    else if (!strcmp(what, "clk_bpm")) have = eng_clk_bpm_x10;           /* the tempo found at the load, x10 (0: none) */
+    else if (!strcmp(what, "clk_tried")) have = eng_clk_tried;          /* the last load looked for the tempo */
+    else if (!strcmp(what, "clk_ratio")) have = eng_clk_ratio;          /* ENG_CLK_RATIO index (3: x1) */
+    else if (!strcmp(what, "clk_offset")) have = eng_clk_offset_ms;     /* ms */
+    else if (!strcmp(what, "clk_click")) have = eng_clk_click;
+    else if (!strcmp(what, "msg_notempo")) have = strstr(ui.msg, "NO TEMPO") != 0;   /* the message says no tempo found */
+    else if (!strcmp(what, "msg_kept")) have = strstr(ui.msg, "KEPT") != 0;          /* ... the song's kept clock */
+    else if (!strcmp(what, "clk_kept")) have = ui.clk_saved;            /* the last load took the song's kept clock */
+    else if (!strcmp(what, "kept")) have = (long)cs_tab.count;          /* songs with a kept clock */
+    else if (!strcmp(what, "clk_manual")) have = eng_clk_manual;        /* the clock's tempo set by hand */
+    else if (!strcmp(what, "follow")) have = eng_follow;                /* following the clock coming in */
+    else if (!strcmp(what, "follow_bpm")) have = eng_follow_bpm_x10;    /* its BPM x 10 */
+    else if (!strcmp(what, "follow_err")) have = labs((long)eng_follow_err_us) / 100;   /* |the tune's pulse - the clock's|, 0.1 ms */
+    else if (!strcmp(what, "clk_first_tune_ms")) have = (long)((uint64_t)eng_clk_first_cyc * 1000u / c64.clock_hz);   /* beat 1 in the tune */
+    else if (!strcmp(what, "dpulses")) have = (long)(clk_pulses - mark_pulses);   /* clock pulses since `mark` */
     else if (!strncmp(what, "songsize", 8)) { uint32_t sz = 0; song_file(atoi(what + 8), &sz, 0, 0); have = (long)sz; }
     else if (!strcmp(what, "fault")) have = c64.fault;
     else if (!strcmp(what, "cutoff")) have = sid_fc(rx.out);
@@ -486,8 +557,13 @@ int main(int argc, char **argv)
             for (; n; n -= s) { enc_acc[e] += s; run_ms(gap); }
         } else if (!strcmp(cmd, "midi")) {               /* midi STATUS D1 D2, hex: 90 3c 64 */
             uint32_t st = (uint32_t)strtoul(a, 0, 16), d1 = (uint32_t)strtoul(b, 0, 16), d2 = (uint32_t)strtoul(c, 0, 16);
-            midi_q[mq_w++ % 64u] = st >> 4 | st << 8 | d1 << 16 | d2 << 24;
+            if (st >= 0xF8) clock_in(st, now_ms * (PLAT_TICKS_HZ / 1000u));
+            if (st != 0xF8) midi_q[mq_w++ % 64u] = st >> 4 | st << 8 | d1 << 16 | d2 << 24;
             run_ms(2);
+        } else if (!strcmp(cmd, "clockin")) {            /* clockin BPM: a MIDI clock comes in (0: none) */
+            if (clkin_bpm <= 0.0) clkin_next_ms = (double)now_ms + 1.0;   /* (running: the next pulse as it was due) */
+            clkin_bpm = atof(a);
+            clkin_jitter = *b ? atof(b) : 0.0;
         } else if (!strcmp(cmd, "busy")) eng_busy = (uint8_t)atoi(a);   /* busy 0|1: as the device's load valve */
         else if (!strcmp(cmd, "master")) master = (uint32_t)atoi(a);
         else if (!strcmp(cmd, "sid")) {                 /* sid FILE [LEN_DS ...] */
@@ -522,9 +598,15 @@ int main(int argc, char **argv)
             songs_changed();
         } else if (!strcmp(cmd, "wav")) { snprintf(out, sizeof out, "%s/%s", dir, a); wav_open(out); }
         else if (!strcmp(cmd, "peakreset")) peak_out = 0.0f;
-        else if (!strcmp(cmd, "mark")) { mark_frames = c64.frames; mark_scope = eng_scope_n; }
+        else if (!strcmp(cmd, "mark")) { mark_frames = c64.frames; mark_scope = eng_scope_n; mark_pulses = clk_pulses; }
         else if (!strcmp(cmd, "asid")) { snprintf(out, sizeof out, "%s/%s", dir, a); if (asid_file) fclose(asid_file); asid_file = fopen(out, "wb"); }
         else if (!strcmp(cmd, "wavstop")) wav_close();
+        else if (!strcmp(cmd, "clicks")) {               /* clicks FILE: the clock's beats, frames in the recording */
+            FILE *cf; uint32_t i2;
+            snprintf(out, sizeof out, "%s/%s", dir, a);
+            cf = fopen(out, "w");
+            if (cf) { for (i2 = 0; i2 < rt_nbeats; i2++) fprintf(cf, "%u\n", rt_beats[i2]); fclose(cf); }
+        }
         else if (!strcmp(cmd, "shot")) { snprintf(out, sizeof out, "%s/%s", dir, a); png_write(out); }
         else if (!strcmp(cmd, "leds")) {
             int i;

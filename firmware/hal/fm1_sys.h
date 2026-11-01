@@ -108,6 +108,30 @@ static void fm1_sysvdd_raise(uint32_t level)
     }
 }
 
+/* ------------------------------------------------------- PLL2, 540 MHz --- */
+/* M-VAVE's boot loaders differ, and an FM-1 keeps the one it last had from M-VAVE (custom firmware
+ * updates leave the flash head). V15's (isd_config SYS_CLK 360 MHz) programs PLL2 to 540 MHz and runs
+ * the system clock from it (CLK_CON2 bit 2: 540 / 1.5); V16's (SYS_CLK 320 MHz) leaves PLL2 off, both
+ * its registers 0, and runs at 320 MHz: 12 % slower. fm1_pll2_540 sets PLL2 up as V15's does, in the
+ * order of the AC79 SDK's pll2_init (the fields with the PLL off, then on, then its output); the switch
+ * to it is fl_clock_v15_ram (fm1_flash.h). */
+#define FM1_PLL2_CON0 (*(volatile uint32_t *)0x119A8u)
+#define FM1_PLL2_CON1 (*(volatile uint32_t *)0x119ACu)
+#define FM1_SYS_CLK_CON2 (*(volatile uint32_t *)0x10014u)
+#define FM1_PLL2_CON0_V15 0x0940022Bu       /* ref 24 MHz / 2, on (bit 0), output (bit 1) */
+#define FM1_PLL2_CON1_V15 0x0750310Cu       /* x 270 (0x10C + 2): 540 MHz */
+static int fm1_clock_v16(void) { return FM1_PLL2_CON0 == 0u && FM1_PLL2_CON1 == 0u && !(FM1_SYS_CLK_CON2 & 4u); }
+static void fm1_pll2_540(void)
+{
+    FM1_PLL2_CON0 = FM1_PLL2_CON0_V15 & ~3u;
+    FM1_PLL2_CON1 = FM1_PLL2_CON1_V15;
+    __asm__ volatile("csync" ::: "memory");
+    FM1_PLL2_CON0 |= 1u;
+    fm1_delay_us(160);
+    FM1_PLL2_CON0 |= 2u;
+    fm1_delay_us(10);
+}
+
 /* ------------------------------------------------------------ watchdog --- */
 #define FM1_P3_WDT_CON 0x80u
 #define FM1_P3_VLD_KEEP 0x17u

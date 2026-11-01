@@ -32,6 +32,8 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
 #define PORTD_OUT       REG32(0x500C0u)            /* PD0 = flash CS# */
 #define PORTD_DIR       REG32(0x500C8u)
 #define CACHE_CON       REG32(0x1EEE008u)          /* b14 = cache idle */
+#define FL_CLK_CON0     REG32(0x1000Cu)            /* b8: the system clock from the PLL, else the RC (b1: 16 MHz) */
+#define FL_CLK_CON2     REG32(0x10014u)            /* b2: the system clock from PLL2 (fm1_sys.h) */
 #define T4_CNT          REG32(0x10804u)            /* TIMER4, 24 MHz free-running */
 
 #define FL_XIP(off)     FM1_XIP(off)              /* fm1_xip.h */
@@ -152,6 +154,33 @@ static RAMFN uint32_t fl_jedec_ram(void)                 /* expect 0x856014 */
     fl_cs(1);
     fl_exit(&s);
     return id;
+}
+
+/* The system clock onto PLL2 (set up first: fm1_pll2_540), as V15's boot loader runs it: 360 MHz
+ * instead of V16's 320. The AC79 SDK's order (sys_clock_update): the system clock from the 16 MHz RC
+ * meanwhile, the source switched, the flash timing (SFC_CON [23:20]: V15's 9, V16's 8) with it, then
+ * back to the PLL. XIP is off around it: RAM only, no calls, interrupts off (the caller). */
+static RAMFN void fl_clock_v15_ram(void)
+{
+    uint32_t sfc, c0;
+    fl_cache_idle();
+    fl_csync();
+    while ((int32_t)SFC_CON < 0) ;                /* SFC idle */
+    sfc = SFC_CON;
+    c0 = FL_CLK_CON0;
+    SFC_CON = 0;                                  /* XIP off */
+    fl_csync();
+    FL_CLK_CON0 = (c0 | 2u) & ~0x100u;            /* the RC, 16 MHz */
+    fl_csync();
+    fl_delay(50);
+    FL_CLK_CON2 |= 4u;                            /* PLL2 */
+    fl_csync();
+    fl_delay(50);
+    SFC_CON = (sfc & ~0x00F00000u) | 0x00900000u; /* XIP on, V15's flash timing */
+    fl_csync();
+    FL_CLK_CON0 = c0 | 0x100u;                    /* the PLL again: 540 / 1.5 */
+    fl_csync();
+    fl_delay(50);
 }
 
 static RAMFN uint32_t fl_status_ram(void)                /* SR1 | SR2 << 8 */

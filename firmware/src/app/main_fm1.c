@@ -35,9 +35,35 @@ static int16_t stem_buf[REND_FRAMES * 3u];  /* the voices, for USB audio's four 
 #define LOAD_BUSY_OFF LOAD_Q8(75)           /* ... and comes back below */
 #define LOAD_STEMS_MAX LOAD_Q8(90)          /* the USB voice channels sit out a half after one above */
 
+/* the MIDI clock's bytes, timed: a byte rendered at frame f of a half goes out when that frame
+ * plays, a half after the half's interrupt (TIMER5 sends it; USB carries it at its next poll) */
+#define RT_Q 32u
+#define RT_TICKS_PER_FRAME (FM1_TICKS_PER_US * 1000000u / ENG_RATE)   /* 544 */
+static struct { uint32_t due; uint8_t b; } rt_q[RT_Q];
+static volatile uint32_t rt_w, rt_r;
+static uint32_t rt_t0, rt_block;            /* the half's interrupt (ticks), the block's first frame in it */
+void plat_midi_rt(uint8_t b, uint32_t frame)
+{
+    if (rt_w - rt_r >= RT_Q) return;
+    rt_q[rt_w % RT_Q].due = rt_t0 + (HALF_FRAMES + rt_block + frame) * RT_TICKS_PER_FRAME;
+    rt_q[rt_w % RT_Q].b = b;
+    __asm__ volatile("" ::: "memory");
+    rt_w++;
+}
+uint32_t plat_frame_ticks(uint32_t frame) { return rt_t0 + (HALF_FRAMES + rt_block + frame) * RT_TICKS_PER_FRAME; }
+static void rt_service(void)                /* TIMER5: the bytes due */
+{
+    uint32_t now = fm1_ticks();
+    while (rt_r != rt_w && (int32_t)(now - rt_q[rt_r % RT_Q].due) >= 0) {
+        midi_out_event(0x0Fu | (uint32_t)rt_q[rt_r % RT_Q].b << 8);   /* (TIMER5: no guard, see usb.c) */
+        rt_r++;
+    }
+}
+
 static void render_block(int32_t *o)        /* ALNK0: one half, measured */
 {
     uint32_t t0 = fm1_ticks(), us, budget = HALF_FRAMES * 1000000u / ENG_RATE, i, b;
+    rt_t0 = t0;
     int32_t m = (int32_t)master_q12;
     dbg.in_audio = 1;
 #if FELUCCA_UAC
@@ -51,6 +77,7 @@ static void render_block(int32_t *o)        /* ALNK0: one half, measured */
 #endif
     for (b = 0; b < HALF_FRAMES; b += REND_FRAMES) {
         int32_t *ob = o + 2u * b;
+        rt_block = b;
         eng_render(ob, (int)REND_FRAMES, UNITY_Q12);
 #if FELUCCA_UAC_STEMS
         uac_tap(ob, eng_stem_out, REND_FRAMES);   /* the computer records before MASTER */
@@ -120,6 +147,7 @@ void fm1_timer5_irq(void)
     fm1_timer5_ack();
     dbg.timer_irqs++;
     fm1_input_tick();
+    rt_service();                           /* the MIDI clock's bytes, each when its frame plays */
     /* 2 kHz: all USB SIE traffic lives here. This ISR nests into the audio render (so the key
      * matrix keeps its rhythm); USB shares the MIDI queues with the main loop, and a poll that
      * falls inside the render waits for the first tick outside it. */
@@ -132,12 +160,14 @@ void fm1_timer5_irq(void)
         uart_midi_poll();                   /* the TRS jack: same context, same queue */
 #endif
     }
+    else if (dbg.in_audio && sub % 5u == 0u) {
 #if FELUCCA_UAC
-    else if (dbg.in_audio && sub % 5u == 0u)
         uac_service();                      /* USB audio: a packet each 1 ms frame, renders or not (a
                                              * render takes 3 to 5 ms); only EP4, and usb_poll never
                                              * runs meanwhile, so INDEX is not shared */
 #endif
+        usb_render_tx();                    /* MIDI out (the clock) too, on time: EP1 */
+    }
     if (++sub == 10u)
         sub = 0;
     {
@@ -265,6 +295,11 @@ static void fm1_main(void)
         supply_vdc14 = (uint8_t)fm1_vdc14();
         supply_sysvdd = (uint8_t)fm1_sysvdd();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
+        if (flash_ok && fm1_clock_v16()) {  /* M-VAVE's V16 boot loader: 320 MHz; to 360 as V15's (fm1_sys.h) */
+            fm1_pll2_540();
+            FL_FAR(fl_clock_v15_ram)();
+            supply_clock = 1;
+        }
         irq_restore(f);
         if (flash_ok) {
             fl_plain_window_init();         /* the song slots read as plaintext through XIP */

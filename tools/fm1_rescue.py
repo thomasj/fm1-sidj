@@ -3,27 +3,32 @@
 """fm1_rescue: put stock firmware back on an FM-1 through the chip's own update mode (the
 mask-ROM "UBOOT"), from a Mac, with no extra hardware.
 
-For an FM-1 whose firmware crashes at start-up. X0X 0.2-beta crashes at once, and after two failed
+For an FM-1 whose firmware crashes at start-up, or one left in the chip's update mode (an install
+cut short). X0X 0.2-beta crashed at once, and after two failed
 boots enters UBOOT, which shows up on USB as "WL80UBOOT1.00" (4C4A:8057). macOS then takes it for a
 disk, upsets it, and it reboots into the crash a few seconds later; this script waits for it,
 takes it away from macOS (hence sudo) and keeps it.
 
   python3 -m venv ~/fm1-rescue && ~/fm1-rescue/bin/pip install pyusb libusb-package
-  sudo ~/fm1-rescue/bin/python fm1_rescue.py FM-1.fwsc            # check and back up, write nothing
-  sudo ~/fm1-rescue/bin/python fm1_rescue.py FM-1.fwsc --write    # then write stock
+  sudo ~/fm1-rescue/bin/python fm1_rescue.py V15.fwsc V16.fwsc            # check and back up, write nothing
+  sudo ~/fm1-rescue/bin/python fm1_rescue.py V15.fwsc V16.fwsc --write    # then write stock
 
-FM-1.fwsc is M-VAVE's FM-1 V16 or V15 (m-vave.com/download, PC Firmware); only those exact
-files are accepted. The protocol and the write policy are FM-1-transporter's (github.com/kurogedelic/
-FM-1-transporter, docs/PROTOCOL.md), which were verified on hardware:
+The packages are M-VAVE's FM-1 firmware, V16 and V15 (m-vave.com/download, PC Firmware); only those
+exact files are accepted. Each brings its own bootloader in the flash head (M-VAVE's updater rewrites
+the head; custom firmware leaves it), and this script never writes the head, so it writes the version
+whose head the FM-1 already has: give it every version you have, and it picks (after X0X's). The
+protocol and the write policy are FM-1-transporter's (github.com/kurogedelic/FM-1-transporter,
+docs/PROTOCOL.md), which were verified on hardware:
 
   1. JieLi's flash loader (wl82loader.bin, from github.com/kagaimiq/jl-uboot-tool, downloaded
      and checked against its hash) is loaded into RAM and started;
   2. the chip key must be 980F and the flash 856014 (1 MiB), or nothing is done;
   3. the whole flash is read and saved as a backup before anything else;
-  4. only 4 KiB sectors in [0x4000, the package's end) that differ from it are written (V15 ends at
+  4. the package whose head [0, 0x4000) equals the FM-1's is chosen (none: nothing is written);
+  5. only 4 KiB sectors in [0x4000, the package's end) that differ from it are written (V15 ends at
      0x93000, V16 at 0xA9000; the bootloader below 0x4000 and the device data above the end are
-     never touched; a difference below 0x4000 stops it), each erased, written and read back;
-  5. a final full read must equal the expected image; then the FM-1 restarts into it.
+     never touched), each erased, written and read back;
+  6. a final full read must equal the expected image; then the FM-1 restarts into it.
 """
 import argparse
 import hashlib
@@ -219,8 +224,8 @@ class Uboot:
             out += self.bot.xfer(cdb_for(CMD_READ_FLASH, struct.pack(">IH", addr + len(out), k)), n_in=k)
         return bytes(out)
 
-    def write_sector(self, addr, data):
-        if addr < WRITE_MIN or addr >= APP_END or addr % SECTOR or len(data) != SECTOR:
+    def write_sector(self, addr, data, end):
+        if addr < WRITE_MIN or addr >= end or end > APP_END or addr % SECTOR or len(data) != SECTOR:
             raise Fail(f"refusing to write {addr:#x}")
         self.cmd(CMD_ERASE_SECTOR, struct.pack(">I", addr))
         for off in range(0, SECTOR, IO):
@@ -236,9 +241,18 @@ class Uboot:
 
 
 # ------------------------------------------------------------------- flow ---
-def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, name="V15"):
-    """Everything in one session: the FM-1 leaves UBOOT (and crashes again) as soon as it is let go."""
-    end = len(image)
+def pick(packages, flash):
+    """The package whose head [0, WRITE_MIN) is the one on the FM-1 (this script never writes it)."""
+    for name, image in packages:
+        if image[:WRITE_MIN] == flash[:WRITE_MIN]:
+            return name, image
+    raise Fail("the protected head of the flash is not " + " or ".join(n for n, _ in packages)
+               + "'s: not writing; send this output and the backup")
+
+
+def rescue(dev, packages, loader, write, backup_dir, say=print, confirm=None):
+    """Everything in one session: the FM-1 leaves UBOOT (and crashes again) as soon as it is let go.
+    packages: [(name, flash image)], the stock versions to choose from by the FM-1's head."""
     vendor, product = dev.inquiry()
     say(f"  device: {vendor} {product}")
     if vendor != "WL82":
@@ -255,12 +269,11 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, name=
     with open(path, "wb") as f:
         f.write(now)
     say(f"  backup saved: {path} ({time.time() - t0:.1f} s)")
-    diff = [a for a in range(0, end, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
-    low = [a for a in diff if a < WRITE_MIN]
-    if low:
-        raise Fail(f"the protected head of the flash differs from {name} (sectors "
-                   + " ".join(f"{a:#06x}" for a in low) + "): not writing; send this output and the backup")
-    say(f"  {len(diff)} of {end // SECTOR} firmware sectors differ from {name}")
+    name, image = pick(packages, now)
+    end = len(image)
+    say(f"  the FM-1's bootloader is {name}'s")
+    diff = [a for a in range(WRITE_MIN, end, SECTOR) if image[a:a + SECTOR] != now[a:a + SECTOR]]
+    say(f"  {len(diff)} of {(end - WRITE_MIN) // SECTOR} firmware sectors differ from {name}")
     if not write and confirm is not None:
         write = keep_alive(dev, confirm)
     if not write:
@@ -271,7 +284,7 @@ def rescue(dev, image, loader, write, backup_dir, say=print, confirm=None, name=
     for i, a in enumerate(reversed(diff)):
         for attempt in range(3):
             try:
-                dev.write_sector(a, image[a:a + SECTOR])
+                dev.write_sector(a, image[a:a + SECTOR], end)
                 break
             except Fail as e:
                 if attempt == 2:
@@ -382,24 +395,34 @@ def ask():
         return False
 
 
+def load_packages(paths):
+    """[(name, flash image)] of M-VAVE's packages given, each version once; anything else refused."""
+    packages = []
+    for path in paths:
+        raw = open(path, "rb").read()
+        stock = STOCK.get(hashlib.sha256(raw).hexdigest())
+        if not stock:
+            raise Fail(f"{path} is not M-VAVE's FM-1 V16 or V15 package (sha256 mismatch)")
+        name, size = stock
+        image = package_flash_image(raw)
+        if len(image) != size:
+            raise Fail(f"{path}: unexpected flash entry size")
+        if all(name != n for n, _ in packages):
+            packages.append((name, image))
+    return packages
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("package", help="M-VAVE's FM-1 V16 or V15 .fwsc")
-    ap.add_argument("--write", action="store_true", help="write it (without it: check and back up only)")
+    ap.add_argument("package", nargs="+", help="M-VAVE's FM-1 .fwsc files (V16, V15: every one you have)")
+    ap.add_argument("--write", action="store_true", help="write stock (without it: check and back up only)")
     ap.add_argument("--ask", action="store_true", help="after the check and the backup, ask before writing")
     ap.add_argument("--loader", help="a local wl82loader.bin instead of downloading it")
     ap.add_argument("--wait", type=float, default=120, help="seconds to wait for the FM-1 (default 120)")
     ap.add_argument("--tries", type=int, default=5, help="attempts if it drops out mid-way (default 5)")
     args = ap.parse_args()
     try:
-        raw = open(args.package, "rb").read()
-        stock = STOCK.get(hashlib.sha256(raw).hexdigest())
-        if not stock:
-            raise Fail(f"{args.package} is not M-VAVE's FM-1 V16 or V15 package (sha256 mismatch)")
-        name, size = stock
-        image = package_flash_image(raw)
-        if len(image) != size:
-            raise Fail("unexpected flash entry size")
+        packages = load_packages(args.package)
         loader = get_loader(args.loader)
         if os.geteuid() != 0:
             raise Fail("run it with sudo: macOS has to give the device up")
@@ -408,13 +431,13 @@ def main():
             import usb.util
         except ImportError:
             raise Fail("pyusb is missing: ~/fm1-rescue/bin/pip install pyusb libusb-package")
-        backup_dir = os.path.dirname(os.path.abspath(args.package))
+        backup_dir = os.path.dirname(os.path.abspath(args.package[0]))
         for attempt in range(1, args.tries + 1):
             bot = open_device(usb, args.wait)
             try:
-                rescue(Uboot(bot), image, loader, args.write, backup_dir,
+                rescue(Uboot(bot), packages, loader, args.write, backup_dir,
                        say=lambda *a, **k: print(*a, **k, flush=True),
-                       confirm=ask if args.ask else None, name=name)
+                       confirm=ask if args.ask else None)
                 return 0
             except (Fail, usb.core.USBError) as e:
                 print(f"\n  attempt {attempt}: {e}")

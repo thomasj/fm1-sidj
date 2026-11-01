@@ -1,0 +1,45 @@
+# A MIDI clock coming in (with a millisecond's jitter): a small change of tempo (120 to 121 BPM) is
+# followed within a second (the last beat steadily off the bar starts the bar anew); a Stop keeps
+# the clock's tempo while the song is paused (no pulses, after a few already on their way: not taken
+# for a clock gone), and Continue
+# goes on from it; after a Stop, the song played from the panel with no clock lets it go in a second
+sid @SID1@
+turn K2 3
+clockin 120 1
+wait 300
+midi fa 0 0
+wait 5000
+expect follow 1
+expect follow_bpm >1198
+expect follow_bpm <1202
+clockin 121 1
+wait 1000
+expect follow_bpm >1208
+expect follow_bpm <1212
+midi fc 0 0
+wait 60
+clockin 0
+wait 2000
+expect playing 0
+expect follow 1
+expect follow_bpm >1208
+expect follow_bpm <1212
+clockin 121 1
+midi fb 0 0
+wait 300
+expect playing 1
+expect follow 1
+expect follow_bpm >1208
+expect follow_bpm <1212
+wait 3000
+expect follow_err >-40
+expect follow_err <40
+expect clk_pulses 0
+midi fc 0 0
+clockin 0
+wait 500
+expect follow 1
+tap PLAY
+wait 1500
+expect playing 1
+expect follow 0

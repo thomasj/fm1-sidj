@@ -1,0 +1,106 @@
+# SID + MIDI CLOCK (the output, KNOB 2 in SONGS): a load first finds the tune's beat, running it ahead
+# silently; Commando (rows of 6 frames, 125 BPM) then plays from its start with the clock on its first
+# row (Start, 24 pulses a beat). A pause sends Stop, the play after it Continue; playing it again
+# starts the clock again; the tempo carries it; browsing with SELECT loads paused without looking
+# for the tempo (quick), and PLAY then looks; GLO's KNOB 4 puts the clock's tempo right (x2: twice
+# the pulses, the tune untouched), and REC + PLAY keeps the tempo found and that ratio; another
+# output stops it; GLO + PLAY turns a click on the beats on and off; KNOB 3 offsets the clock, and
+# a song put right keeps its clock: its next load takes it without looking (both back: forgotten)
+sid @SID1@
+sid @SID1@
+expect clk_on 0
+turn K2 3
+expect output 3
+tap PLAY
+wait 300
+expect playing 1
+expect clk_on 1
+expect clk_bpm >1250
+expect clk_bpm <1256
+expect clk_starts 1
+expect clk_pulses >3
+mark
+wait 2000
+expect clk_pulses >95
+expect dpulses >98
+expect dpulses <102
+tap GLO
+turn K4 3
+wait 600
+expect clk_ratio 6
+mark
+wait 1000
+expect dpulses >98
+expect dpulses <102
+expect tempo 100
+press REC
+tap PLAY
+release REC
+wait 300
+expect playing 1
+expect clk_on 1
+expect clk_ratio 6
+turn K4 -3
+wait 1000
+expect clk_ratio 3
+expect kept 0
+press GLO
+tap PLAY
+release GLO
+expect clk_click 1
+expect playing 1
+press GLO
+tap PLAY
+release GLO
+expect clk_click 0
+turn K3 8
+wait 100
+expect clk_offset 40
+expect kept 1
+tap SEQ
+wait 100
+tap PLAY
+wait 300
+expect clk_kept 1
+expect clk_offset 40
+expect clk_on 1
+tap GLO
+turn K3 -8
+wait 100
+expect clk_offset 0
+expect kept 0
+tap PLAY
+wait 300
+expect playing 0
+expect clk_stops 3
+tap PLAY
+wait 300
+expect clk_conts 1
+tap SEQ
+wait 100
+tap PLAY
+wait 300
+expect playing 1
+expect clk_starts 4
+expect clk_on 1
+tap GLO
+turn K1 10 20
+wait 2000
+expect clk_on 1
+turn SELECT 1
+wait 300
+expect playing 0
+expect clk_tried 0
+expect clk_on 0
+tap PLAY
+wait 300
+expect playing 1
+expect clk_tried 1
+expect clk_starts 5
+tap SEQ
+wait 100
+turn K2 1
+wait 300
+expect output 0
+expect clk_on 0
+expect clk_stops 6

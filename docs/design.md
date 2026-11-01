@@ -17,6 +17,7 @@ to an *output*:
 | emulated SID (a fixed-point port of reSID 0.16) | the FM-1's audio jack, and USB audio to a computer: the mix, or the mix and each voice |
 | ASID (SysEx, one message per chip and frame) | USB-MIDI to real SID hardware (a SidStation, a TherapSID, a TeensyROM, a USBSID-Pico) through a MIDI host |
 | both at once | the emulation for monitoring, ASID to the real chip |
+| SID+CLK: the emulated SID and a MIDI clock | the audio jack and USB audio as above, and a MIDI clock in time with the tune on USB-MIDI |
 
 On the way to the output the writes pass through the *remix*: the panel's overrides of pitch,
 waveform, envelope, pulse width and filter ([README, Remix](../README.md#remix)).
@@ -59,7 +60,7 @@ per frame:
   dummy read, and CIA 2's serial register keeps what was written. NMI sample players depend on
   all of it (an RTI kept at $DD0C acknowledges the CIA by reading $DD0D).
 - **PAL and NTSC**: 985248 Hz and 19656 cycles per frame, or 1022727 Hz and 17095. The
-  SID's sampling follows the clock. The file's flags choose; the user can override.
+  SID's sampling follows the clock. The file's flags choose.
 - **One SID**: 2SID and 3SID tunes are refused when added and when played. Measured on the
   FM-1 (October 2026), the 6510 and the C64 cost about 25 % of the audio budget and each
   emulated SID about 28 %: one SID ran at about 53 %, two at 81 to 93 % with peaks over 100 %,
@@ -91,6 +92,25 @@ A chunk's output is the write log, `(cycle, chip, register, value)` in order, af
   frame ends exactly at the raster wrap (the C64 reports the cycle). A resume after a pause
   sends the whole image, since receivers reset at 0x4D. RSID tunes are never sent (they drive
   the whole C64 at their own cycles, often with samples); they play on the emulated SID.
+
+## The MIDI clock
+
+The full behaviour is in [midi.md](midi.md#midi-clock); the design in short:
+
+- **The beat comes from the tune** (`firmware/src/app/beat.c`): at load the C64 runs ahead
+  silently, the player's calls are counted by their bursts of writes, and each voice's note
+  starts are noted by call. The grid is the longest row (or swing pair of rows) nearly all note
+  starts land on; the beat is four rows or, for a tune in threes, six; halved or doubled into
+  70..180 BPM. The tune then starts over, so the clock begins with its first row.
+- **Pulses at their cycles**: the engine puts each pulse into the chunk's write log at its tune
+  cycle, so it is rendered at the sample it belongs to. TIMER5 sends each byte when that sample
+  plays, not when the block is rendered, and USB carries it at its next poll.
+- **Kept clocks** (`clkstore.c`): the tempo found, its ratio and offset, or a tempo set by hand,
+  per song and subsong by MD5, in a flash object of their own, written at the next quiet moment.
+- **Following a clock**: incoming pulses are timestamped as they arrive. The tune's own pulses
+  (not sent) are paired with them by number; the tune's speed is the ratio of the two spacings,
+  steered by the timing error, so its beats land on the clock's. The incoming spacing is measured
+  over a bar against USB's jitter.
 
 ## Songs on the device
 
@@ -128,9 +148,10 @@ with the panel on a page: songs added from the page, the ASID stream to Web MIDI
 - The SID engine against reSID 0.16, sample by sample.
 - 6510: Klaus Dormann's functional test plus an interrupt test.
 - The SID file parser, the C64 (interrupts, timers, banking, the KERNAL replacement), the
-  remix, the ASID sink, the storage, the encoder.
-- Scenarios in the simulator (the songs, the player, the remix, ASID), with HVSC tunes when
-  HVSC is on the machine (the files are not committed: HVSC's own terms).
+  remix, the ASID sink, the storage, the encoder, the beat finder.
+- Scenarios in the simulator (the songs, the player, the remix, ASID, the MIDI clock out and
+  in), with HVSC tunes when HVSC is on the machine (the files are not committed: HVSC's own
+  terms).
 - The update path against the package: the update entry, the loader, the installer.
 - The browser emulator headless in node.
 - The C64 against libsidplayfp's own C64 (README, Verification): the SID write sequences of
@@ -178,5 +199,8 @@ Tested on a SidStation.
 - **Profile on the device**: the Mac's timings misled. A temporary tick counter in the audio
   interrupt showed the C64 and the SID at about a third of the budget each for a sample-heavy
   tune; the divides in the waveform averages were the largest single cost.
+- **The CPU clock after V16's boot loader**: M-VAVE's V16 leaves the chip at 320 MHz, V15's at
+  360, and a custom firmware keeps whichever the FM-1 last had. SiDJ sets V15's clock up at boot
+  ([platform.md](platform.md)), so its load figures hold on every FM-1.
 - **Not yet**: streaming from the computer (a jukebox: a folder played file by file through a
   RAM slot, without filling the flash).

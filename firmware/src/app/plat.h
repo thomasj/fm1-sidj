@@ -32,7 +32,24 @@ void plat_leds(uint32_t buttons, uint32_t keys);   /* lit: bit B_*, bit key */
 /* USB / TRS MIDI in, as 4-byte USB-MIDI event packets (cable 0); out to USB */
 int plat_midi_in(uint32_t *pkt);            /* 1 = got one */
 void plat_midi_out(uint32_t pkt);           /* from the audio context too */
+void plat_midi_out_msg(const uint32_t *pkt, int n);   /* a whole message: nothing (the clock) between its packets */
 int plat_midi_out_free(void);               /* packets the out ring takes now (0 without a host) */
+/* a MIDI real-time byte (the clock) at frame `frame` of the block eng_render is rendering: it goes
+ * out when that frame plays, not when it is rendered (a block's bytes would leave together) */
+void plat_midi_rt(uint8_t b, uint32_t frame);
+/* the MIDI clock coming in (USB or the jack): each pulse's time in ticks, numbered from the last
+ * Start (PLAT_CLK_FREE between Stop and Continue: not counted); a Start itself as PLAT_CLK_START,
+ * a Stop as PLAT_CLK_STOP;
+ * and when frame `frame` of the block eng_render is rendering will play, in the same ticks. A full
+ * queue keeps its newest entry the latest pulse */
+#define PLAT_TICKS_HZ 24000000u
+#define PLAT_CLK_FREE 0xFFFFFFFFu
+#define PLAT_CLK_START 0xFFFFFFFEu
+#define PLAT_CLK_STOP 0xFFFFFFFDu
+int plat_clock_in(uint32_t *t, uint32_t *k);   /* 1 = got one */
+uint32_t plat_frame_ticks(uint32_t frame);
+uint32_t plat_ticks(void);
+void plat_keepalive(void);                  /* a long job in the main loop (the MIDI clock's beat): the watchdog fed */
 
 /* persistent storage (Felucca's storage.c objects: A/B sectors, CRC, torn-write safe) */
 int plat_store_load(uint32_t obj, void *dst, uint32_t max);    /* bytes loaded, < 0 = none / bad */
@@ -61,5 +78,6 @@ void plat_cpu_stats(uint32_t *mean_x10, uint32_t *peak_x10);
 /* stop the song for a flash change: it fades out, and returns once it has (the erase then stops
  * no audio mid-sound) */
 void plat_stop_for_flash(void);
-/* the supply levels set at boot: s[0] VDC14 (1.25 V + 50 mV a level), s[1] SYSVDD (0.93 V + 30 mV) */
-void plat_supplies(uint8_t s[2]);
+/* the supply levels set at boot: s[0] VDC14 (1.25 V + 50 mV a level), s[1] SYSVDD (0.93 V + 30 mV);
+ * s[2] 1 when V16's boot loader left the system clock at 320 MHz and it was raised to 360 */
+void plat_supplies(uint8_t s[3]);

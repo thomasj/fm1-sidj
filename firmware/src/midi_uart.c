@@ -36,7 +36,9 @@ static void um_byte(uint32_t b)
 {
     if (b >= 0xF8u) {                              /* real time: any time, keeps running status */
         if (b == 0xF8u || b == 0xFAu || b == 0xFBu || b == 0xFCu) {
-            if (um_put(0xFu | b << 8))
+            clock_in(b);                           /* (usb.c: the clock timed, not queued) */
+            if (b == 0xF8u) um.msgs++;
+            else if (um_put(0xFu | b << 8))
                 um.msgs++;
             else
                 um.drops++;

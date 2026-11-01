@@ -83,7 +83,30 @@ int plat_midi_in(uint32_t *pkt)
     mi_r++;
     return 1;
 }
-void plat_midi_out(uint32_t pkt) { midi_out_event(pkt); }
+int plat_clock_in(uint32_t *t, uint32_t *k)
+{
+    if (ci_r == ci_w)
+        return 0;
+    *t = ci_t[ci_r % CQ];
+    *k = ci_k[ci_r % CQ];
+    ci_r++;
+    return 1;
+}
+uint32_t plat_ticks(void) { return fm1_ticks(); }
+void plat_midi_out(uint32_t pkt)            /* the audio ISR: TIMER5 (the clock) must not preempt the write */
+{
+    uint32_t f = irq_save();
+    midi_out_event(pkt);
+    irq_restore(f);
+}
+void plat_keepalive(void) { fm1_wdt_feed(); }
+void plat_midi_out_msg(const uint32_t *pkt, int n)  /* the clock's TIMER5 nests into the render: not between these */
+{
+    uint32_t f = irq_save();
+    int i;
+    for (i = 0; i < n; i++) midi_out_event(pkt[i]);
+    irq_restore(f);
+}
 int plat_midi_out_free(void) { return usb.config ? (int)(MQ - (mo_w - mo_r)) : 0; }
 
 int plat_store_load(uint32_t obj, void *dst, uint32_t max) { return flash_ok ? st_load(obj, dst, max) : -1; }
@@ -103,8 +126,9 @@ void plat_usb_audio(uint32_t s[6])
 #endif
 }
 static uint8_t supply_vdc14, supply_sysvdd;   /* read back at boot (main_fm1.c), where P33 is ours */
+static uint8_t supply_clock;                /* 1: V16's boot loader left 320 MHz, raised to 360 at boot */
 void plat_stop_for_flash(void) { flash_quiet(0); }
-void plat_supplies(uint8_t s[2]) { s[0] = supply_vdc14; s[1] = supply_sysvdd; }
+void plat_supplies(uint8_t s[3]) { s[0] = supply_vdc14; s[1] = supply_sysvdd; s[2] = supply_clock; }
 
 void plat_cpu_stats(uint32_t *mean_x10, uint32_t *peak_x10)
 {

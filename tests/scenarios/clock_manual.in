@@ -1,0 +1,65 @@
+# SID+CLK with no tempo found (Wizball): GLO's KNOB 4 sets one by hand, from about 120 BPM, a step a
+# player call more or less a beat (Wizball calls its player four times a frame: 1.2 BPM or so);
+# the clock starts at once, REC + PLAY starts it again from the tune's first write, the song keeps
+# it (its next load takes it without looking), and KNOB 4 turned below 40 BPM
+# turns it off and forgets it
+sid @SID2@
+turn K2 3
+tap PLAY
+wait 300
+expect playing 1
+expect clk_tried 1
+expect clk_on 0
+expect msg_notempo 1
+tap GLO
+turn K4 1
+wait 100
+expect clk_manual 1
+expect clk_on 1
+expect clk_bpm 1202
+turn K4 1
+wait 300
+expect clk_bpm 1215
+expect clk_starts 1
+expect kept 1
+mark
+wait 2000
+expect dpulses >95
+expect dpulses <100
+press REC
+tap PLAY
+release REC
+wait 300
+expect clk_on 1
+expect clk_manual 1
+expect clk_bpm 1215
+expect clk_starts 2
+turn K3 4
+wait 100
+expect clk_offset 20
+tap SEQ
+wait 100
+tap PLAY
+wait 300
+expect playing 1
+expect clk_kept 1
+expect msg_kept 1
+expect msg_notempo 0
+expect clk_manual 1
+expect clk_bpm 1215
+expect clk_offset 20
+expect clk_on 1
+tap GLO
+turn K4 -2
+wait 300
+expect clk_bpm 1191
+turn K4 -200 10
+wait 300
+expect clk_on 0
+expect clk_manual 0
+expect clk_bpm 0
+expect kept 0
+turn K4 1
+wait 100
+expect clk_bpm 1202
+expect clk_on 1

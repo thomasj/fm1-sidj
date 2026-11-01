@@ -132,6 +132,7 @@ td .sub2 { color: var(--muted); font-size: .84rem; }
 .result .t span.muted { display: inline; color: var(--muted); margin-left: .4em; }
 .result .btn.sm { padding: .35em .8em; }
 .result button { font: inherit; font-size: .84rem; padding: .35em .9em; border-radius: 8px; border: 1px solid #2e5a2e; background: rgba(130, 235, 130, .08); color: var(--g); cursor: pointer; }
+.result button.hear { border-color: var(--line); background: transparent; color: inherit; }
 .drop { border-style: dashed; }
 .drop.over { border-color: var(--g); background: rgba(130, 235, 130, .05); }
 .cheats { columns: 2; column-gap: 26px; margin-top: 16px; }   /* down the first column, then the second */
@@ -210,7 +211,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
       <div class="feature" style="--c:var(--r)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15V9M9 15V3M15 15v-5"/><circle cx="3" cy="7" r="1.6"/><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="8" r="1.6"/></svg></div>
         <h3>Remix every voice</h3><p>Hold a key on the FM-1 or a MIDI keyboard and the voice follows, in time. Mute, solo, swap waveforms, bend envelopes and pulse width, push the cutoff up to 16×, give each voice its own LFO, and ride the tempo and a vinyl fader, from the panel or a controller's CCs. Two buttons put it all back.</p></div>
       <div class="feature" style="--c:var(--b)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="12" height="10" rx="1.5"/><path d="M6 1v3M9 1v3M12 1v3M6 14v3M9 14v3M12 14v3"/></svg></div>
-        <h3>Real SID, USB audio</h3><p>Drive a SidStation, TherapSID, TeensyROM or USBSID-Pico over ASID, remix included, alone or alongside the emulation. Over the same cable the FM-1 is a driverless audio interface: the mix, or each voice on its own channel, straight into your DAW.</p></div>
+        <h3>Real SID, USB audio</h3><p>Drive a SidStation, TherapSID, TeensyROM or USBSID-Pico over ASID, remix included, alone or alongside the emulation. Over the same cable the FM-1 is a driverless audio interface: the mix, or each voice on its own channel, straight into your DAW. And a MIDI clock in time with the tune, its beat found from the tune itself, to sync a drum machine; or the tune follows the clock that comes in.</p></div>
       <div class="feature" style="--c:var(--w)"><div class="ic"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="14" height="10" rx="1.5"/><path d="M6 16h6M9 13v3"/></svg></div>
         <h3>Try it first</h3><p>The <a href="emu/">browser emulator</a> runs the very same firmware, panel and all. Drop a .sid on it and play.</p></div>
     </div>
@@ -351,7 +352,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
             <div class="cheat"><span class="keys"><kbd>PLAY</kbd></span><span>play the song</span></div>
             <div class="cheat"><span class="keys"><kbd>PRESETS</kbd></span><span>the subsong</span></div>
             <div class="cheat"><span class="keys"><kbd>KNOB 1</kbd></span><span>the SID chip: AUTO (the tune's), 6581 or 8580</span></div>
-            <div class="cheat"><span class="keys"><kbd>KNOB 2</kbd></span><span>output: emulated SID, ASID, or both</span></div>
+            <div class="cheat"><span class="keys"><kbd>KNOB 2</kbd></span><span>output: emulated SID, ASID, both, or SID+CLK (the emulated SID with a MIDI clock)</span></div>
             <div class="cheat"><span class="keys"><kbd>KNOB 3</kbd></span><span>USB audio: the mix, or the mix and each voice</span></div>
             <div class="cheat"><span class="keys"><kbd>SAVE</kbd></span><span>keep these settings</span></div>
           </div>
@@ -361,9 +362,10 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
             <div class="cheat"><span class="keys"><kbd>REC</kbd><i>&amp;</i><kbd>PLAY</kbd></span><span>play from the start</span></div>
             <div class="cheat"><span class="keys"><kbd>SELECT</kbd></span><span>the next or previous song</span></div>
             <div class="cheat"><span class="keys"><kbd>PRESETS</kbd></span><span>the subsong</span></div>
-            <div class="cheat"><span class="keys"><kbd>ALGORITHM</kbd></span><span>output: emulated SID, ASID, or both</span></div>
+            <div class="cheat"><span class="keys"><kbd>ALGORITHM</kbd></span><span>output: emulated SID, ASID, both, or SID+CLK (the emulated SID with a MIDI clock)</span></div>
             <div class="cheat"><span class="keys"><kbd>MASTER</kbd></span><span>the level at the audio jack</span></div>
             <div class="cheat"><span class="keys"><kbd>SEQ</kbd></span><span>back to the song list</span></div>
+            <div class="cheat"><span class="keys"><kbd>GLO</kbd><i>&amp;</i><kbd>PLAY</kbd></span><span>SID+CLK: a click on the clock's beats, on or off</span></div>
           </div>
           <p class="cheatgroup">Voices and keys</p>
           <div class="cheats">
@@ -406,7 +408,7 @@ footer .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
             <div class="cheat"><span class="keys"><kbd>ENV</kbd></span><span>attack, decay, sustain, release</span></div>
             <div class="cheat"><span class="keys"><kbd>SEL</kbd></span><span>cutoff, resonance</span></div>
             <div class="cheat"><span class="keys"><kbd>LFO</kbd></span><span>rate, depth, target, shape: an LFO per voice</span></div>
-            <div class="cheat"><span class="keys"><kbd>GLO</kbd></span><span>tempo 25–150 %, a ±8 % vinyl fader</span></div>
+            <div class="cheat"><span class="keys"><kbd>GLO</kbd></span><span>tempo 25–150 %, a ±8 % vinyl fader; with SID+CLK, the clock's offset and its tempo (put right, or set by hand)</span></div>
           </div>
           <p class="cheatgroup">Back to the tune</p>
           <div class="cheats">
@@ -834,6 +836,21 @@ $("reopen").addEventListener("click", async () => {
   folder = await recallFolder();
   if (folder) { $("reopen").hidden = false; $("reopen").textContent = `Reopen ${folder.name}`; }
 })();
+// a tune heard first: the browser emulator, opened as emu/#import, plays it as SiDJ does. One
+// emulator tab is kept: it says it is ready, then takes each tune sent to it
+let emuWin = null, emuReady = false, emuNext = null;
+addEventListener("message", (e) => {
+  if (e.source !== emuWin || !e.data || e.data.type !== "sidj-ready") return;
+  emuReady = true;
+  if (emuNext) { emuWin.postMessage(emuNext, location.origin); emuNext = null; }
+});
+function listen(name, bytes) {
+  const m = { type: "sidj-song", name, bytes, from: "the song page" };
+  if (emuWin && !emuWin.closed && emuReady) { emuWin.postMessage(m, location.origin); emuWin.focus(); return; }
+  emuNext = m; emuReady = false;
+  emuWin = window.open("emu/#import", "_blank");
+  if (!emuWin) say("hvscstat", "The browser blocked the emulator's tab: allow pop-ups for this page.", true);
+}
 function search() {
   const box = $("results"), q = $("q").value;
   box.textContent = "";
@@ -843,11 +860,15 @@ function search() {
   for (const e of hits) {
     const p = prettyPath(e.path), d = document.createElement("div");
     d.className = "result";
-    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><button>Add</button>`;
+    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><button class="hear" title="Hear it in the browser emulator">Listen</button><button>Add</button>`;
     d.querySelector("b").textContent = p.title;
     d.querySelectorAll(".t span")[0].textContent = e.lens.length > 1 ? `${e.lens.length} songs` : fmtLen(e.lens[0] || 0);
     d.querySelectorAll(".t span")[1].textContent = p.where;
-    d.querySelector("button").addEventListener("click", async () => {
+    const [hear, add] = d.querySelectorAll("button");
+    hear.addEventListener("click", async () => {
+      try { listen(p.title, await readHvsc(hvsc.root, e.path)); } catch (err) { say("hvscstat", `${p.title}: ${err.message}`, true); }
+    });
+    add.addEventListener("click", async () => {
       try { await addFiles([{ name: p.title, bytes: await readHvsc(hvsc.root, e.path), lens: e.lens }]); }
       catch (err) { say("songstat", `${p.title}: ${err.message}`, true); }
     });
@@ -864,11 +885,13 @@ starterTunes().then((tunes) => {
   for (const t of tunes) {
     const d = document.createElement("div");
     d.className = "result";
-    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><a class="btn sm" href="emu/">Listen</a><button>Add</button>`;
+    d.innerHTML = `<div class="t"><b></b> <span class="muted"></span><span></span></div><button class="hear" title="Hear it in the browser emulator">Listen</button><button>Add</button>`;
     d.querySelector("b").textContent = t.name;
     d.querySelectorAll(".t span")[0].textContent = fmtLen(t.lens[0] || 0);
     d.querySelectorAll(".t span")[1].textContent = `${t.author} · ${t.released}`;
-    d.querySelector("button").addEventListener("click", () => addFiles([{ name: t.name, bytes: t.bytes, lens: t.lens }]));
+    const [hear, add] = d.querySelectorAll("button");
+    hear.addEventListener("click", () => listen(t.name, t.bytes));
+    add.addEventListener("click", () => addFiles([{ name: t.name, bytes: t.bytes, lens: t.lens }]));
     box.appendChild(d);
   }
   $("addstarters").addEventListener("click", () => addFiles(tunes.map((t) => ({ name: t.name, bytes: t.bytes, lens: t.lens }))));

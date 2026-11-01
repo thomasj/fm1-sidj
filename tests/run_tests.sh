@@ -5,6 +5,7 @@
 # (tests/scenarios/*.in, output in build/scenarios/). HVSC at $HVSC (default ~/Music/C64Music)
 # gives the scenarios real tunes; without it they play the tune c64_test writes.
 # $FM1_OFFICIAL, M-VAVE's FM-1.fwsc, adds the update entry's way back to the official firmware.
+# $FM1_STOCK, M-VAVE's V15 and V16 packages (space-separated), adds them to the rescue tool's test.
 set -e
 cd "$(dirname "$0")/.."
 CC="${CC:-cc}"
@@ -24,6 +25,9 @@ build/host/sidfile_test
 echo "== c64_test (interrupts, timers, banking, the KERNAL replacement)"
 $CC -O2 -Wall -Wextra -std=c11 -o build/host/c64_test tests/c64_test.c firmware/src/c64/c64.c firmware/src/c64/cpu6502.c firmware/src/c64/sidfile.c
 build/host/c64_test
+echo "== beat_test (the tune's beat for the MIDI clock: grids found, folded, refused)"
+$CC -O2 -Wall -Wextra -std=c11 -o build/host/beat_test tests/beat_test.c firmware/src/app/beat.c
+build/host/beat_test
 echo "== remix_test"
 $CC -O2 -Wall -Wextra -std=c11 -o build/host/remix_test tests/remix_test.c firmware/src/app/remix.c
 build/host/remix_test
@@ -107,4 +111,5 @@ if [ -f build/sidj.fwsc ]; then
 else
     echo "  skip update-path tests (no build/sidj.fwsc: run ./build.sh)"
 fi
+"$PY" tests/rescue_test.py                   # the rescue tool; $FM1_STOCK: M-VAVE's V15 and V16 too
 echo "all tests passed"

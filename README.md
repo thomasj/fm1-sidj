@@ -18,6 +18,9 @@ The sound comes out three ways, alone or together:
 - **Real SID hardware** over ASID: a SidStation, TherapSID, TeensyROM, USBSID-Pico or any other
   ASID receiver, with the remix included.
 
+And a **MIDI clock** in time with the tune, found from the tune itself, to sync a drum machine or
+sequencer.
+
 ▶ **[Watch SiDJ in action](https://youtu.be/bY161B9_Evk)**, a demo video on YouTube.
 
 ## Get started
@@ -27,11 +30,6 @@ The sound comes out three ways, alone or together:
 2. On the same page, add songs: two of mine in one click, or search your copy of HVSC.
 3. Play. The [browser emulator](https://thomasj.github.io/fm1-sidj/emu/) runs the same
    firmware if you want to try it first.
-
-The emulator also takes a song from another page: opened as `emu/#import`, it tells the page
-that opened it that it is ready, takes one .sid from it, adds it to its songs and plays it when
-switched on. SID Factory II Pocket's page uses it to
-open a song composed on the FM-1 in SiDJ, ready to play and remix.
 
 Installing custom firmware is at your own risk. The same page puts M-VAVE's official firmware
 back whenever you like.
@@ -54,7 +52,7 @@ for voice 1, 2 or 3.
 | `PLAY` | play the song and go to the player |
 | `PRESETS` | the subsong |
 | `KNOB 1` | the chip: AUTO (the one the tune was written for), 6581 or 8580 |
-| `KNOB 2` | the output: the emulated SID, ASID, or both |
+| `KNOB 2` | the output: the emulated SID, ASID, both, or the emulated SID with a MIDI clock |
 | `KNOB 3` | USB audio: the mix, or the mix and the three voices |
 | `SAVE` | keep these settings, and this song as the one selected at power-on |
 
@@ -76,7 +74,7 @@ note, waveform, envelope and pulse width; the filter is beneath them.
 | `REC` & `PLAY` | play from the start |
 | `SELECT` | the next / previous song |
 | `PRESETS` | the subsong |
-| `ALGORITHM` | the output: the emulated SID, ASID, or both |
+| `ALGORITHM` | the output: the emulated SID, ASID, both, or the emulated SID with a MIDI clock |
 | `MASTER` | the level at the audio jack |
 | `SEQ` | back to the song list |
 
@@ -139,7 +137,7 @@ Drums keep sounding like drums: a voice playing pure noise keeps its waveform an
 | `ENV` | attack | decay | sustain | release |
 | `SEL` (FLT) | cutoff | resonance | | |
 | `LFO` | rate | depth | target: pulse width, pitch or cutoff | shape |
-| `GLO` | tempo, 25 to 150 % | vinyl fader, ±8 % | | |
+| `GLO` | tempo, 25 to 150 % | vinyl fader, ±8 % | SID+CLK: the clock's offset | SID+CLK: the clock's tempo put right, or set by hand |
 
 Each voice has its own LFO. The tempo speeds the tune up without changing its pitch; the vinyl
 fader moves both, like a turntable. A new song or subsong starts at 100 % with the fader at 0,
@@ -170,6 +168,12 @@ connects through a USB-MIDI host box or a computer. ASID sends one update per fr
 sounds (drums, speech) only sound right on the emulation, and RSID tunes are never sent: they
 play on the emulated SID.
 
+**SID+CLK** plays the emulated SID and sends a MIDI clock over USB, its beat found in the tune
+itself. On the `GLO` page, `KNOB 4` puts a wrong tempo right (or sets one when none is found) and
+`KNOB 3` moves the clock; `GLO` & `PLAY` clicks on the beats. A clock coming in over USB or the
+MIDI IN jack starts, stops and continues the song, and with SID+CLK the tune follows it. More in
+[SiDJ over MIDI](docs/midi.md#midi-clock).
+
 # Installing
 
 The web page, <https://thomasj.github.io/fm1-sidj/>, installs SiDJ and puts the official
@@ -180,7 +184,9 @@ firmware back (with the `FM-1.fwsc` you download from M-VAVE). From the command 
 .venv/bin/python3 tools/fm1_install.py build/sidj.fwsc   # install a package
 ```
 
-Both work from M-VAVE's firmware, Felucca, X0X and SiDJ itself. If something goes wrong:
+Both work from M-VAVE's firmware (V15 or V16), Felucca, X0X and SiDJ itself. SiDJ runs at full
+speed whichever official firmware the FM-1 had before: M-VAVE's V16 leaves the chip at 320 MHz
+instead of V15's 360, and SiDJ sets 360 back up as it starts. If something goes wrong:
 two failed starts give a safe mode (PLAY tries again), four give the chip's own update mode,
 and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the chip's update mode,
 `tools/fm1_rescue.sh` puts the official firmware back, and Leo Kuroshita's
@@ -190,9 +196,10 @@ and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the ch
 firmwares built on it keep their user samples (0xA0000 to 0xDBFFF). Adding songs erases what
 another firmware saved there, and other firmwares cannot read SiDJ's songs. SiDJ ignores
 anything in the area that is not a SiDJ song. Back up your samples and projects before you
-install SiDJ. Going the other way, save a setlist on the web page (step 2) before you install another
-firmware: it keeps every song, its order and song lengths in one .zip, and Load setlist puts them
-back. The page also keeps a copy in the browser and offers it back when it finds the FM-1 empty.
+install SiDJ. Going the other way, save a setlist on the web page (step 2) before you install
+another firmware: it keeps every song, its order and song lengths in one .zip, and Load setlist
+puts them back. The page also keeps a copy in the browser and offers it back when it finds the
+FM-1 empty.
 
 ## Songs from the command line
 
@@ -240,7 +247,10 @@ web/emu/build.sh            # the browser emulator (needs Emscripten)
 jack off, `SIDJ_CDC=1` adds a USB serial console.
 
 `tools/make_site.py build/sidj-1.0.0.fwsc` builds the web site around a package, in
-`build/site`. `tools/release.sh X.Y.Z` makes a public release: the package, the tests, one
+`build/site`. The browser emulator also takes a song from another page: opened as `emu/#import`,
+it tells the page that opened it that it is ready, takes one .sid from it, adds it to its songs
+and plays it when switched on. SID Factory II Pocket's page uses it to open a song composed on the
+FM-1 in SiDJ, ready to play and remix. `tools/release.sh X.Y.Z` makes a public release: the package, the tests, one
 commit on the public repository, the GitHub release and the site.
 
 ## How it works
@@ -259,6 +269,9 @@ The design and its reasoning are in [docs/design.md](docs/design.md). In short:
   derives one from the other.
 - **ASID** (`firmware/src/app/asid.c`) sends each frame's changes as one message, cut exactly
   at the raster wrap.
+- **The MIDI clock** (`firmware/src/app/beat.c`, `engine.c`) finds the tune's beat from when its
+  voices start to sound, schedules the pulses at their cycles, and follows a clock coming in by
+  steering the tune's speed; `clkstore.c` keeps each song's clock.
 
 ## Verification
 
@@ -274,7 +287,7 @@ Why reSID 0.16: [docs/engine-choice.md](docs/engine-choice.md).
 | --- | --- |
 | `sid/` | the SID engine |
 | `firmware/src/c64/` | the 6510, the SID file format, the C64 and its driver |
-| `firmware/src/app/` | the engine, the remix, the UI, the song store, ASID, settings, the boot and main loop |
+| `firmware/src/app/` | the engine, the remix, the UI, the song store, ASID, the beat and kept clocks, settings, the boot and main loop |
 | `firmware/src/`, `firmware/hal/`, `firmware/loader/` | the platform, the hardware layer and the update loader, from Felucca by way of X0X |
 | `host/` | the simulator and the WAV player |
 | `web/site/`, `web/emu/` | the web page (installer, song manager) and the browser emulator |
