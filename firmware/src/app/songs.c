@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* SiDJ song store: .sid files packed one after another in Felucca's user data area
- * (0xA0000 to 0xDBFFF, 240 KB), each entry 256-byte aligned: a 32-byte header, the HVSC song
- * lengths, the file. Deleting clears the header's live flag in place (a bit can go from 1 to 0
+/* SiDJ song store: .sid files packed one after another, from 0x93000 to 0xF2FFF (384 KB; docs/design.md
+ * has the map), each entry 256-byte aligned: a 32-byte header, the HVSC song lengths, the file. A
+ * computer may send the file compressed: its first SONG_Z_HEAD bytes as they are (the list reads
+ * the name, the author and the flags in place), the rest raw deflate; the FM-1 unpacks it at load.
+ * Entries from before this layout start at 0xA0000, and stay there until the pool is tidied. Deleting clears the header's live flag in place (a bit can go from 1 to 0
  * without an erase); new entries go after the last one, into blank flash; when the pool is
  * full the transfer tool wipes it and sends the live entries again. The index of live entries
  * is built at boot by walking the pool and read in place through the XIP window.
@@ -13,8 +15,11 @@
  * song_erase_sector, song_prog) are defined by the unity build over the flash driver and by the
  * simulator over RAM. Needs: ENG_FILE_MAX (engine.h), eng_post, ota_frame_get / ota_frame_done /
  * ota_wire_send (device) or their host stand-ins, songs_changed(), songs_play_request(). */
-#define SONG_POOL_BASE 0xA0000u
-#define SONG_POOL_END 0xDC000u
+#include "inflate.c"
+#define SONG_POOL_BASE 0x93000u
+#define SONG_POOL_OLD 0xA0000u              /* where the pool started up to SiDJ 1.3 */
+#define SONG_POOL_END 0xF3000u
+#define SONG_Z_HEAD 0x7Eu                   /* a compressed file's plain start: the PSID header, the load address */
 #define SONG_POOL_SIZE (SONG_POOL_END - SONG_POOL_BASE)
 #define SONG_ALIGN 256u
 #define SONG_SECTOR 4096u
@@ -25,12 +30,12 @@
 
 typedef struct {
     uint32_t magic;
-    uint32_t size;                          /* file bytes */
+    uint32_t size;                          /* bytes stored */
     uint8_t live;                           /* 0xFF live, 0x00 deleted */
     uint8_t nlen;                           /* song lengths that follow the header (uint16 deciseconds each) */
-    uint8_t rsv[2];
-    uint8_t md5[16];
-    uint16_t crc;                           /* of the file, CCITT 0x1021, init 0 */
+    uint16_t raw;                           /* the file's size unpacked; 0: it is stored as it is */
+    uint8_t md5[16];                        /* of the unpacked file */
+    uint16_t crc;                           /* of the bytes stored, CCITT 0x1021, init 0 */
     uint16_t hcrc;                          /* of the header's first 30 bytes, live counted as 0xFF */
 } song_hdr_t;
 
@@ -73,12 +78,14 @@ static uint16_t song_hdr_crc(const song_hdr_t *h)
 static int song_hdr_ok(const song_hdr_t *h)
 {
     return h->magic == SONG_MAGIC && h->size && h->size <= ENG_FILE_MAX && h->nlen <= SONG_MAX_LEN &&
-           h->hcrc == song_hdr_crc(h);
+           h->raw <= ENG_FILE_MAX && h->hcrc == song_hdr_crc(h);
 }
 
 static void songs_scan(void)
 {
     uint32_t off = SONG_POOL_BASE;
+    if (!song_hdr_ok((const song_hdr_t *)song_ptr(off)) && song_hdr_ok((const song_hdr_t *)song_ptr(SONG_POOL_OLD)))
+        off = SONG_POOL_OLD;                /* the songs of an older SiDJ, where they are */
     song_count = 0;
     while (off + SONG_HDR <= SONG_POOL_END) {
         const song_hdr_t *h = (const song_hdr_t *)song_ptr(off);
@@ -113,6 +120,26 @@ static int song_file_ok(int k)              /* the file as it was stored: its CR
     return f && song_crc16(f, size) == ((const song_hdr_t *)song_ptr(song_index[k]))->crc;
 }
 
+/* the live entry k's file, unpacked if need be, into out: its size, or -1 */
+static int song_load(int k, uint8_t *out, uint32_t max)
+{
+    uint32_t size, i;
+    const uint8_t *f = song_file(k, &size, 0, 0);
+    uint32_t raw;
+    int n;
+    if (!f) return -1;
+    raw = ((const song_hdr_t *)song_ptr(song_index[k]))->raw;
+    if (!raw) {
+        if (size > max) return -1;
+        for (i = 0; i < size; i++) out[i] = f[i];
+        return (int)size;
+    }
+    if (raw > max || size <= SONG_Z_HEAD || raw <= SONG_Z_HEAD) return -1;
+    for (i = 0; i < SONG_Z_HEAD; i++) out[i] = f[i];
+    n = inflate_raw(f + SONG_Z_HEAD, size - SONG_Z_HEAD, out + SONG_Z_HEAD, raw - SONG_Z_HEAD);
+    return n == (int)(raw - SONG_Z_HEAD) ? (int)raw : -1;
+}
+
 static const uint8_t *song_hvsc_name(int k)                   /* the file's name field (32 bytes, may lack a NUL) */
 {
     uint32_t size;
@@ -133,15 +160,16 @@ static int song_delete(int k)                                 /* clear the live 
     return 0;
 }
 
-/* append a file: 0 = ok, -1 too big, -2 no room, -3 flash error */
-static int song_put(const uint8_t *data, uint32_t size, const uint8_t *md5, const uint16_t *len, int nlen)
+/* append a file (raw: its unpacked size, 0 if stored as it is): 0 = ok, -1 too big, -2 no room, -3 flash
+ * error */
+static int song_put_ex(const uint8_t *data, uint32_t size, const uint8_t *md5, const uint16_t *len, int nlen, uint32_t raw)
 {
     song_hdr_t h;
     uint32_t off = song_end, need, end, i, lo;
     uint8_t lens[SONG_MAX_LEN * 2 + 4];
     if (!size || size > ENG_FILE_MAX || nlen > SONG_MAX_LEN) return -1;
     for (i = 0; i < sizeof h; i++) ((uint8_t *)&h)[i] = 0;
-    h.magic = SONG_MAGIC; h.size = size; h.live = 0xff; h.nlen = (uint8_t)nlen;
+    h.magic = SONG_MAGIC; h.size = size; h.live = 0xff; h.nlen = (uint8_t)nlen; h.raw = (uint16_t)raw;
     for (i = 0; i < 16; i++) h.md5[i] = md5 ? md5[i] : 0;
     h.crc = song_crc16(data, size);
     h.hcrc = song_hdr_crc(&h);
@@ -172,6 +200,11 @@ static int song_put(const uint8_t *data, uint32_t size, const uint8_t *md5, cons
     return 0;
 }
 
+static int song_put(const uint8_t *data, uint32_t size, const uint8_t *md5, const uint16_t *len, int nlen)
+{
+    return song_put_ex(data, size, md5, len, nlen, 0);
+}
+
 static int song_wipe(void)                                    /* every sector of the pool */
 {
     uint32_t s;
@@ -186,7 +219,7 @@ enum { SX_INFO = 1, SX_ENTRY, SX_PUT_BEGIN, SX_PUT_DATA, SX_PUT_END, SX_GET, SX_
 static uint32_t sx_usb_at;                  /* SX_USB: when to reconnect (after the reply has gone), 0 none */
 
 static uint8_t song_rx[ENG_FILE_MAX] SIDJ_POOL;             /* the file being received */
-static uint32_t song_rx_size, song_rx_got;
+static uint32_t song_rx_size, song_rx_got, song_rx_raw;
 static int song_rx_open, song_rx_nlen;
 static uint8_t song_rx_md5[16];
 static uint16_t song_rx_len[SONG_MAX_LEN];
@@ -247,10 +280,11 @@ static void songs_service(void)
     case SX_INFO:                                           /* -> pool size, used, entries (2), max file, version */
         wr32(out, SONG_POOL_SIZE); wr32(out + 4, song_end - SONG_POOL_BASE);
         out[8] = (uint8_t)song_count; out[9] = (uint8_t)(song_count >> 8);
-        wr32(out + 10, ENG_FILE_MAX); out[14] = 1;
+        wr32(out + 10, ENG_FILE_MAX); out[14] = 2;          /* (2: PUT_BEGIN takes a compressed file, ENTRY says the size) */
         sx_reply(0x40 | SX_INFO, out, 15);
         break;
-    case SX_ENTRY: {                                        /* idx (2) -> status, size (4), nlen, lengths (2 each), name / author / released (32 each) */
+    case SX_ENTRY: {                                        /* idx (2) -> status, bytes stored (4), nlen, lengths (2 each), name / author / released (32 each),
+                                                             * the size unpacked (2; 0: stored as it is) */
         int k = d >= 2 ? sx_dec[0] | sx_dec[1] << 8 : -1, nlen = 0;
         uint32_t size = 0;
         const uint16_t *len = 0;
@@ -261,17 +295,23 @@ static void songs_service(void)
         n = 6;
         for (i = 0; i < (uint32_t)nlen; i++) { out[n++] = (uint8_t)len[i]; out[n++] = (uint8_t)(len[i] >> 8); }
         for (i = 0; i < PSID_INFO_LEN; i++) out[n++] = (f && size >= PSID_HDR_V1_SIZE) ? f[PSID_HDR_NAME + i] : 0;
+        i = f ? ((const song_hdr_t *)song_ptr(song_index[k]))->raw : 0u;
+        out[n++] = (uint8_t)i; out[n++] = (uint8_t)(i >> 8);
         sx_reply(0x40 | SX_ENTRY, out, n);
         break;
     }
-    case SX_PUT_BEGIN:                                      /* size (4), nlen, md5 (16), lengths (2 each) -> status */
+    case SX_PUT_BEGIN:                                      /* bytes to store (4), nlen, md5 (16), lengths (2 each), the size unpacked (2; may be left
+                                                             * out, or 0: stored as it is; else SONG_Z_HEAD plain bytes, then raw deflate) -> status */
         if (d < 21) { out[0] = 1; sx_reply(0x40 | SX_PUT_BEGIN, out, 1); break; }
         song_rx_size = rd32(sx_dec);
         song_rx_nlen = sx_dec[4] > SONG_MAX_LEN ? SONG_MAX_LEN : sx_dec[4];
         for (i = 0; i < 16; i++) song_rx_md5[i] = sx_dec[5 + i];
         for (i = 0; i < (uint32_t)song_rx_nlen && 21 + 2 * i + 1 < d; i++) song_rx_len[i] = (uint16_t)(sx_dec[21 + 2 * i] | sx_dec[22 + 2 * i] << 8);
+        i = 21u + 2u * (uint32_t)song_rx_nlen;
+        song_rx_raw = i + 2u <= d ? sx_dec[i] | (uint32_t)sx_dec[i + 1] << 8 : 0u;
         song_rx_got = 0;
-        song_rx_open = song_rx_size && song_rx_size <= ENG_FILE_MAX;
+        song_rx_open = song_rx_size && song_rx_size <= ENG_FILE_MAX && song_rx_raw <= ENG_FILE_MAX &&
+                       (!song_rx_raw || (song_rx_size > SONG_Z_HEAD && song_rx_raw > SONG_Z_HEAD));
         out[0] = song_rx_open ? 0 : 1;
         sx_reply(0x40 | SX_PUT_BEGIN, out, 1);
         break;
@@ -286,8 +326,8 @@ static void songs_service(void)
             sx_reply(0x40 | SX_PUT_DATA, out, 4);
         }
         break;
-    case SX_PUT_END:                                        /* crc (2) -> status: 0 ok, 1 no transfer, 2 bytes missing, 3 crc, 4 too big, 5 full, 6 flash,
-                                                             * 7 two or three SIDs (the FM-1 plays one) */
+    case SX_PUT_END:                                        /* crc (2) -> status: 0 ok, 1 no transfer, 2 bytes missing, 3 crc,
+                                                             * 4 too big, 5 full, 6 flash, 7 two or three SIDs (the FM-1 plays one) */
         if (d < 2 || !song_rx_open) out[0] = 1;
         else if (song_rx_got != song_rx_size) out[0] = 2;
         else if (song_crc16(song_rx, song_rx_size) != (sx_dec[0] | (uint32_t)sx_dec[1] << 8)) out[0] = 3;
@@ -295,7 +335,7 @@ static void songs_service(void)
         else {
             int rc;
             plat_stop_for_flash();      /* fades out before the erases */
-            rc = song_put(song_rx, song_rx_size, song_rx_md5, song_rx_len, song_rx_nlen);
+            rc = song_put_ex(song_rx, song_rx_size, song_rx_md5, song_rx_len, song_rx_nlen, song_rx_raw);
             out[0] = rc == 0 ? 0 : rc == -1 ? 4 : rc == -2 ? 5 : 6;
         }
         song_rx_open = 0;
@@ -351,7 +391,10 @@ static void songs_service(void)
         out[49] = (uint8_t)ms[4]; out[50] = (uint8_t)(ms[4] >> 8);
         out[51] = eng_ntsc; out[52] = 0; out[53] = eng_tempo; out[54] = (uint8_t)eng_vinyl;
         plat_supplies(out + 55);            /* VDC14, SYSVDD levels; the clock raised from V16's 320 MHz */
-        sx_reply(0x40 | SX_STATS, out, 58);
+        out[58] = eng_follow; wr32(out + 59, (uint32_t)eng_follow_err_us);   /* following a clock: the tune's
+                                             * pulse against the clock's (us, signed), its speed (Q12) */
+        out[63] = (uint8_t)eng_follow_speed; out[64] = (uint8_t)(eng_follow_speed >> 8);
+        sx_reply(0x40 | SX_STATS, out, 65);
         break;
     }
     case SX_OUTPUT:                                         /* mode (0 SID, 1 ASID, 2 both, 3 SID and MIDI clock) -> status; not saved */

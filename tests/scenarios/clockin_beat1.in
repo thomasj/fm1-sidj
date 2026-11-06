@@ -1,0 +1,27 @@
+# A MIDI Start with SID+CLK: the clock coming in starts on its beat 1, and the tune, which cannot start
+# earlier, starts at its own first beat (run ahead silently to it, every write still reaching the
+# chip), so the two are together from the first beat with no catching up. Commando's clock moved
+# 100 ms later (KNOB 3) stands in for a tune whose first beat comes after its start
+sid @SID1@
+turn K2 3
+wait 500
+tap PLAY
+wait 4000
+tap GLO
+turn K3 20
+wait 200
+expect clk_offset 100
+tap PLAY
+wait 500
+expect playing 0
+clockin 120 1
+wait 2000
+midi fa 0 0
+wait 300
+expect playing 1
+expect follow 1
+expect follow_err <200
+expect follow_speed >3880
+expect follow_speed <3970
+wait 3000
+expect follow_err <40

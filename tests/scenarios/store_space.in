@@ -1,0 +1,35 @@
+# the song pool, 0x93000 to 0xF2FFF: a compressed song plays and reads back as its file; the songs of
+# an older SiDJ, left at 0xA0000, are found and new ones go after them; the pool runs on through
+# M-VAVE's patch area (0xEA000) to its end without asking
+sid @SID1@ 50
+sidz build/host/song1.z @SID1SIZE@
+expect songs 2
+tap PLAY
+wait 300
+expect playing 1
+expect cur 0
+turn SELECT 1
+wait 100
+tap PLAY
+wait 500
+expect playing 1
+expect cur 1
+reboot
+expect songs 2
+poolold
+reboot
+expect songs 2
+sid @SID1@ 50
+expect songs 3
+poolwipe
+songraw 60000
+songraw 60000
+songraw 60000
+songraw 60000
+songraw 60000
+songraw 60000
+expect songs 6
+songraw 6000
+expect songs 7
+reboot
+expect songs 7

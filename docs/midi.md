@@ -91,15 +91,15 @@ half. `KNOB 3` moves the clock earlier or later, 5 ms a step (25 turned fast), u
 way. Both change the clock only, not the tune: they are not part of the remix, and `OCT-` with
 `OCT+` leaves them. The screen shows them in grey, K3 the offset and K4 the BPM.
 
-**No tempo found.** There is no clock when no grid shows within the first twelve seconds: tunes in
-free time, with sparse notes or sampled music, with a long quiet intro, and RSID tunes. Over HVSC
-that is about a third of the tunes; the screen says NO TEMPO FOUND: SET ONE WITH GLO K4. Then
-`KNOB 4` on the `GLO` page sets a tempo by hand. The first turn up starts the clock at about
-120 BPM, at once. Each further step makes the beat one player call shorter or longer (three turned
-fast): those are the tempos the tune can have, as it starts notes only on its calls. A tune called
-once a frame on PAL steps 115.7, 120.3, 125.3; one called four times a frame, about 1.2 BPM.
-REC & PLAY then puts beat 1 on the tune's start, and `KNOB 3` moves it. Turned down below 40 BPM,
-the clock is off.
+**No tempo found.** RSID tunes get no clock at all (RSID: NO MIDI CLOCK). For the others there is
+none when no grid shows within the first twelve seconds: tunes in free time, with sparse notes or
+sampled music, or with a long quiet intro. Over HVSC, RSID tunes included, that is about a third of
+the tunes. The screen says NO TEMPO FOUND: SET ONE WITH GLO K4, and `KNOB 4` on the `GLO` page then
+sets a tempo by hand. The first turn up starts the clock at about 120 BPM, at once. Each further
+step makes the beat one player call shorter or longer (three turned fast): those are the tempos the
+tune can have, as it starts notes only on its calls. A tune called once a frame on PAL steps 115.7,
+120.3, 125.3; one called four times a frame, about 1.2 BPM. REC & PLAY then puts beat 1 on the
+tune's start, and `KNOB 3` moves it. Turned down below 40 BPM, the clock is off.
 
 **Kept clocks.** A song keeps its clock for that song and subsong, by the file's MD5, so a setlist
 loaded again keeps it too. That is the tempo found, the ratio and the offset once they are put
@@ -109,8 +109,8 @@ and the song forgets its clock: its next load looks again. REC & PLAY, or PLAY a
 the tempo found as well.
 
 **Hearing it.** `GLO` & `PLAY` adds a click on each of the clock's beats to the sound, to hear
-where the clock is. The clicks are all alike, since SiDJ does not know the bar. Again turns it off,
-and SAVE keeps it.
+where the clock is. The clicks are all alike, since SiDJ does not know the bar. Again turns it off.
+It is off at every start, and picking SID+CLK shows the shortcut.
 
 **Limits.** The clock follows the notes as the tune writes them: a tune whose notes swell in a
 frame or two late (a silent first frame, a filter that opens after the note) has its clock a
@@ -126,8 +126,14 @@ on screen from its start (in SONGS, the one selected), Stop pauses it and Contin
 With the output on SID+CLK and a beat found, the tune follows the clock that comes in. Its speed is
 set so its beats fall on the clock's, then nudged, at most 10 % either way, until they line up:
 within a millisecond, about two seconds after a Start or a change of tempo. The tune's first beat
-goes with the clock's nearest bar. While a clock comes in, SiDJ sends none of its own, the player
+goes with the clock's nearest bar. On a MIDI Start the tune begins at its own first beat, so a tune
+whose first beat comes a little after its start (a pickup, a quiet intro) is in time from the first
+beat: what it would have played before that beat is not heard, but everything it set on the chip is. While a clock comes in, SiDJ sends none of its own, the player
 shows the clock's BPM, and the tempo knob waits until the clock is gone.
+
+A clock that is stopped, or has not been started since the FM-1 was switched on, sets the tempo
+alone: a song played from the panel goes at the clock's tempo from its first beat, and lines up
+with the bars once the clock runs (Start or Continue).
 
 The clock's tempo is measured over its last bar, because USB lands each pulse up to a millisecond
 late. A big change of tempo is taken within half a beat, a small one (1 BPM) within a second.

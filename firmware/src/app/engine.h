@@ -108,6 +108,8 @@ extern volatile int eng_load_rc;            /* sidfile_parse's result of the las
  * file's start song), b = bit0 NTSC override, bit1 PAL override, bits 2-3 model (0 file, 1 6581, 2 8580),
  * ENG_LOAD_PAUSED: loaded and ready, waiting for EV_PLAY */
 #define ENG_LOAD_PAUSED 0x10
+#define ENG_LOAD_REMIX 0x40                 /* the same song again (any subsong): its remix, tempo and fader stay */
+#define ENG_LOAD_BEAT1 0x80                 /* a MIDI Start (SID+CLK): the tune from its first beat, as the clock's */
 #define ENG_LOAD_AGAIN 0x20                 /* the song just played, from its start again (REC + PLAY): SID+CLK keeps
                                              * the tempo it found (and the clock's ratio), no new look */
 typedef struct { volatile uint8_t pending; uint32_t len; uint8_t data[ENG_FILE_MAX]; } eng_file_t;
@@ -140,6 +142,7 @@ extern volatile uint8_t eng_clk_click;        /* 1: a click on each of the clock
 extern volatile uint8_t eng_follow;
 extern volatile uint16_t eng_follow_bpm_x10;
 extern volatile int32_t eng_follow_err_us;
+extern volatile uint16_t eng_follow_speed;     /* the tune's speed while following, Q12 (4096: as written) */
 /* a tempo found before (the song's saved one): set it, then EV_LOAD a playing load with SID+CLK
  * skips the look and starts the clock from it, at its ratio and offset (the load clears valid).
  * eng_clk_get: the tempo the last look found (or was given), 0 if none */

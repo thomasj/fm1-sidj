@@ -164,7 +164,7 @@ int main(int argc, char **argv)
     logical = load_logical(argv[2], &logical_len);
     ofo = flash_off(old);
     nfo = flash_off(logical);
-    /* device: OLD installed, plus a valid update record at 0xE4F00 */
+    /* device: OLD installed, plus a valid update record at 0xFBF00 */
     memset(nor, 0xFF, sizeof nor);
     memcpy(nor, old + ofo, 0x93000);
     memcpy(head, nor, sizeof head);
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
         uint8_t r[112] = {0};
         r[2] = 0x0D; r[3] = 0x5A; r[4] = 0x01; r[5] = 0x5A; r[6] = 0x41; r[7] = 0x54;
         ota_wr16(r, ota_crc16(r + 2, 78, 0));
-        memcpy(nor + 0xE4F00, r, sizeof r);
+        memcpy(nor + 0xFBF00, r, sizeof r);
     }
     rc = ldr_session();
     printf("  rc %d, %u requests, %u sector erases\n", rc, requests, erases);
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
     bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, 0x93000 - 0x4000));
     bad += check("flash head [0, 0x4000) untouched", !memcmp(nor, head, sizeof head));
     bad += check("finish asked (0xF0000000)", f0_asked >= 1);
-    bad += check("update record cleared (RAM + flash)", record_cleared && nor[0xE4F06] == 0xFF);
+    bad += check("update record cleared (RAM + flash)", record_cleared && nor[0xFBF06] == 0xFF);
     bad += check("no write outside the allowed windows", bad_range == 0);
     /* same package again: nothing to erase */
     erases = 0; requests = 0;

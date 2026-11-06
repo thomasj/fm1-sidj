@@ -95,6 +95,7 @@ static uint32_t rt_frame;                   /* the frame of the block eng_render
 volatile uint8_t eng_follow;
 volatile uint16_t eng_follow_bpm_x10;
 volatile int32_t eng_follow_err_us;
+volatile uint16_t eng_follow_speed = 4096u;
 static uint32_t fol_te[FOL_N], fol_ti[FOL_N];   /* the clock's pulses' times, by number; the tune's */
 static uint32_t fol_ne, fol_ni, fol_np;     /* the clock's numbers seen (the last + 1), the tune's, the tune's next to pair */
 static uint32_t fol_last, fol_pe;           /* the clock's last pulse (ticks); its spacing (ticks, /256) */
@@ -110,7 +111,11 @@ static uint8_t fol_held, fol_hold_play;     /* a Stop: the clock's tempo kept wh
 static uint8_t fol_gap;                     /* the bar started after a gap: the last tempo kept until it differs */
 static int32_t fol_shift;                   /* the clock's number paired with the tune's 0 */
 static uint8_t fol_heard, fol_paired, fol_prev;   /* fol_paired: fol_shift chosen; fol_prev: fol_last a pulse */
+static uint8_t fol_run;                     /* the clock runs (counted pulses): the beats line up with its bars;
+                                             * stopped, or never started, it sets the tempo alone */
 static uint32_t fol_q12 = 4096u;            /* the tune's speed while following (4096: as written) */
+static volatile uint32_t fol_start_t;       /* when the last Start came in (ticks) ... */
+static volatile uint8_t fol_start_new;      /* ... not yet used by skip_to_beat1 */
 static uint32_t clk_next, clk_frac, clk_period;   /* the next pulse (tune cycles, + /256), the spacing (/256) */
 
 /* a complete SysEx to USB-MIDI; a message the ring cannot take whole is dropped whole */
@@ -242,6 +247,7 @@ static void fol_speed(uint32_t q12)
 {
     uint32_t lo = ENG_TEMPO_MIN * 4096u / 100u, hi = (uint32_t)eng_speed_cap() * 4096u / 100u;
     fol_q12 = q12 < lo ? lo : q12 > hi ? hi : q12;
+    eng_follow_speed = (uint16_t)fol_q12;
 }
 
 static void fol_reset(void)                 /* a load: the tune's pulses from 0, paired anew */
@@ -257,12 +263,18 @@ static void fol_take(void)                  /* the clock's pulses that came in *
         if (k == PLAT_CLK_STOP) {           /* a Stop: the clock paused, not gone */
             fol_held = 1;
             fol_hold_play = 0;
+            fol_run = fol_paired = 0;
             continue;
         }
+        if (k == PLAT_CLK_FREE) fol_run = fol_paired = 0;   /* stopped: its numbers say nothing of a bar */
+        else if (k != PLAT_CLK_START && !fol_run) { fol_run = 1; fol_paired = 0; }   /* running (again): to its nearest bar */
         if (k != PLAT_CLK_FREE) fol_held = 0;   /* (pulses after the Stop, already on their way, leave it held) */
         if (k == PLAT_CLK_START) {          /* a Start: numbered from 0, paired anew */
+            fol_start_t = t;
+            fol_start_new = 1;
             fol_ne = 0;
             fol_paired = fol_prev = 0;
+            fol_run = 1;
         } else {
             uint32_t d = t - fol_last;      /* the spacing: over the last bar (a pulse lands a USB frame early or late) */
             if (!fol_prev || d >= PLAT_TICKS_HZ / 4u) { fol_wn = fol_dev = 0; fol_gap = 1; }   /* (after a gap: anew) */
@@ -325,7 +337,7 @@ static void fol_pulse(uint32_t n, uint32_t t)   /* the tune's pulse n plays at t
 {
     fol_ti[n % FOL_N] = t;
     fol_ni = n + 1;
-    if (!fol_paired && fol_heard && fol_pe) {   /* the clock's nearest bar */
+    if (!fol_paired && fol_run && fol_heard && fol_pe) {   /* the clock's nearest bar */
         int32_t x = (int32_t)fol_ne - 1 + fol_div((int32_t)(t - fol_last), 256u, fol_pe) - (int32_t)n;
         fol_shift = (x >= 0 ? x + 48 : x - 47) / 96 * 96;
         if ((int32_t)n + fol_shift < 0) fol_shift += 96;
@@ -650,6 +662,92 @@ static void rx_set(uint8_t p, uint8_t voice, int32_t val)   /* EV_RX_SET: the va
     }
 }
 
+/* a MIDI Start, the tune's beat found: the clock coming in starts on its beat 1, and the tune can
+ * start no earlier, so it starts at its own beat 1: run silently up to its first pulse. Every SID write
+ * on the way goes through the remix to the chips, which are clocked along, so their registers and
+ * envelopes are as if it had played; only what it would have sounded before the beat is not
+ * heard. The load and that run take time while the clock goes on, so the tune then runs on by as much
+ * as it will be late when heard, its pulses numbered to match: it comes in where the clock is */
+#define BEAT1_MAX_S 2u
+static uint32_t silent_done, silent_pos[C64_NSID];
+static int silent_first;                    /* the first SID write's cycle seen: where it was, else -1 */
+static uint32_t silent_first_at;
+
+static uint32_t run_silent(uint32_t n)      /* about n tune cycles on, silently: the cycles run (0: a jam) */
+{
+    uint32_t len = c64_run(&c64, n);
+    int i, c;
+    for (i = 0; i < c64.nlog; i++) {
+        const c64_write_t *w = &c64.log[i];
+        uint32_t at = silent_done + w->cycle;
+        if (silent_first < 0) { silent_first = 1; silent_first_at = at; }
+        c = w->chip < C64_NSID ? w->chip : 0;
+        sid_clock(&eng_sid[c], (int)(at - silent_pos[c]));
+        silent_pos[c] = at;
+        if (c == 0) {
+            rx_out_t o[4];
+            int nw = remix_write(&rx, w->reg, w->val, o), k;
+            for (k = 0; k < nw; k++) { sid_write(&eng_sid[0], o[k].reg, o[k].val); eng_regs[0][o[k].reg] = o[k].val; }
+        } else {
+            sid_write(&eng_sid[c], w->reg, w->val);
+            eng_regs[c][w->reg] = w->val;
+        }
+    }
+    silent_done += len;
+    return len;
+}
+
+static void skip_to_beat1(void)
+{
+    uint32_t target = 0, lim = c64.clock_hz * BEAT1_MAX_S, extra = 0;
+    int c, it;
+    fol_take();                             /* the clock's queue, its Start included: the audio interrupt
+                                             * leaves it alone during a load (load_req), so here it is ours */
+    silent_done = 0; silent_first = -1;
+    for (c = 0; c < C64_NSID; c++) silent_pos[c] = 0;
+    for (;;) {                              /* to the first pulse */
+        uint32_t want = CHUNK_CYCLES;
+        if (silent_first > 0 && !target) {  /* where the first pulse falls, as next_chunk puts it */
+            uint32_t to = silent_first_at + clk_off + clk_call * clk_tick;
+            if (clk_offset_cyc >= 0 || (uint32_t)-clk_offset_cyc <= to - silent_first_at) to += (uint32_t)clk_offset_cyc;
+            target = to > silent_done ? to : silent_done;
+        }
+        if (target && silent_done >= target) break;
+        if (target && target - silent_done < want) want = target - silent_done;
+        if (!run_silent(want) || silent_done > lim) break;   /* (a jam, or no beat within 2 s: start where it is) */
+    }
+    if (!target) { for (c = 0; c < C64_NSID; c++) sid_clock(&eng_sid[c], (int)(silent_done - silent_pos[c])); return; }
+    if (fol_pe && fol_start_new) {          /* then on by the time the clock is ahead when the tune is heard */
+        uint32_t khz = chip_clock() / 1000u;   /* (32-bit sums: no 64-bit divide on the FM-1) */
+        for (it = 0; it < 4; it++) {
+            uint32_t p0 = fol_ne ? fol_te[0] : fol_start_t + fol_pe / 256u;   /* the clock's pulse 0: as it came, else due */
+            int32_t late = (int32_t)(plat_ticks() + plat_out_ticks() - p0);
+            uint32_t want, got;
+            if (late <= 0 || late > (int32_t)(PLAT_TICKS_HZ / 2u)) break;   /* (half a second: not this Start's) */
+            want = (uint32_t)late / (PLAT_TICKS_HZ / 1000000u) * khz / 1000u;   /* its microseconds in the chips' cycles ... */
+            want = want * (fol_q12 >> 4) >> 8;    /* ... at the speed the clock sets */
+            if (want <= extra + (uint32_t)(c64.clock_hz / 1000u)) break;   /* (within a millisecond) */
+            want -= extra;
+            while (want) { uint32_t s = want < CHUNK_CYCLES ? want : CHUNK_CYCLES; if (!(got = run_silent(s))) break; extra += got; want -= got < want ? got : want; }
+        }
+    }
+    fol_start_new = 0;
+    for (c = 0; c < C64_NSID; c++) sid_clock(&eng_sid[c], (int)(silent_done - silent_pos[c]));
+    {                                       /* the pulses: those passed counted, the next one in place */
+        uint32_t e256 = extra * 256u, per = clk_period ? clk_period : 1u;   /* (extra: under 2 s of cycles) */
+        uint32_t n0 = e256 / per, rem = (n0 + 1u) * per - e256;
+        clk_resolve = 0;
+        if (!extra) { clk_next = tune_cyc; eng_clk_first_cyc = clk_next; return; }   /* (the Start and pulse 0 at once) */
+        clk_start = 0;                      /* (the Start already went by: numbered as the clock's) */
+        eng_clk_pulses = n0 + 1u;
+        clk_sched = n0 + 1u;
+        fol_reset();
+        clk_next = tune_cyc + (rem >> 8);
+        clk_frac = rem & 255u;
+        eng_clk_first_cyc = clk_next;
+    }
+}
+
 static void do_load(uint8_t song, uint8_t opts)
 {
     int ntsc, i, j, paused = (opts & ENG_LOAD_PAUSED) != 0;
@@ -663,10 +761,13 @@ static void do_load(uint8_t song, uint8_t opts)
     model_ovr = (opts >> 2) & 3;
     eng_ntsc = (uint8_t)ntsc;
     eng_deck_off = eng_file_info.rsid;      /* (before sids_setup: the chips' clock) */
-    eng_tempo = 100;                        /* the deck starts clean too, like the remix */
-    eng_vinyl = 0;
+    if (!(opts & ENG_LOAD_REMIX)) {         /* the deck starts clean too, like the remix ... */
+        eng_tempo = 100;
+        eng_vinyl = 0;
+    }
     sids_setup(ntsc);
-    remix_init(&rx);                        /* a new song starts clean (the cutoff mode stays) */
+    if (opts & ENG_LOAD_REMIX) remix_restart(&rx);   /* ... but the same song again keeps them */
+    else remix_init(&rx);                   /* a new song starts clean (the cutoff mode stays) */
     rx.cutoff_mode = cut_mode;
     for (i = 0; i < C64_NSID; i++) for (j = 0; j < SID_NREG; j++) eng_regs[i][j] = 0;
     clock_off();                            /* (Stop, if it ran) */
@@ -718,6 +819,7 @@ static void do_load(uint8_t song, uint8_t opts)
             eng_clk_on = 1;
             eng_clk_bpm_x10 = det_last.bpm_x10;
             eng_clk_manual = clk_tick == 0;   /* (set by hand: from the first write, at x1) */
+            if (opts & ENG_LOAD_BEAT1) skip_to_beat1();
         }
     } else det_last.valid = 0;              /* (paused, or no clock: the next look is a new one) */
     if (asid_out() && eng_deck_off) asid_stop(&eng_asid);   /* an RSID: the receiver falls silent */

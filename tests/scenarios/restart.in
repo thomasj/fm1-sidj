@@ -1,0 +1,48 @@
+# the same song started again (REC + PLAY, PLAY after its end, another subsong) keeps its remix,
+# the tempo and the fader; another song starts clean
+sid @SID1@ 30
+sid @SID2@
+tap PLAY
+wait 1000
+tap FX
+turn K2 1
+tap REC
+tap GLO
+turn K1 4
+turn K2 3
+wait 300
+expect oct0 1
+expect mute0 1
+expect tempo >100
+expect vinyl >0
+press REC
+tap PLAY
+release REC
+wait 500
+expect playing 1
+expect oct0 1
+expect mute0 1
+expect tempo >100
+expect vinyl >0
+wait 3000
+tap PLAY
+wait 500
+expect playing 1
+expect oct0 1
+expect tempo >100
+turn PRESET 1
+wait 300
+tap PLAY
+wait 500
+expect subsong 2
+expect oct0 1
+expect mute0 1
+expect tempo >100
+turn SELECT 1
+wait 300
+tap PLAY
+wait 500
+expect oct0 0
+expect mute0 0
+expect tempo 100
+expect vinyl 0

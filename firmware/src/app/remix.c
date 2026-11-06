@@ -92,6 +92,27 @@ void remix_reset(remix_t *rx)
     update_neutral(rx);
 }
 
+void remix_restart(remix_t *rx)
+{
+    remix_t keep = *rx;
+    int v;
+    remix_init(rx);
+    for (v = 0; v < RX_NV; v++) {
+        rx_voice_t *x = &rx->v[v];
+        *x = keep.v[v];
+        x->lfo_phase = 0; x->lfo_val = 0; x->lfo_pw = 0; x->lfo_cents = 0;   /* the LFOs from their start */
+        x->key_on = 0; x->shift_on = 0;     /* held keys let go */
+    }
+    rx->cutoff_mode = keep.cutoff_mode;
+    rx->cutoff_scale = keep.cutoff_scale;
+    rx->cutoff_off = keep.cutoff_off;
+    rx->res_off = keep.res_off;
+    rx->fmode_ovr = keep.fmode_ovr;
+    rx->fmode_val = keep.fmode_val;
+    rx->lfo_seed = keep.lfo_seed;
+    update_neutral(rx);
+}
+
 uint16_t remix_note_freq(int midi_note, int ntsc)
 {
     int n = clampi(midi_note, 12, 12 + 8 * 12 - 1) - 12, oct = n / 12, semi = n % 12;

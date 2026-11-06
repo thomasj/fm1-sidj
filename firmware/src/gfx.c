@@ -19,45 +19,34 @@ static uint16_t cv_px[CV_MAX] __attribute__((section(".pool")));
 static uint32_t cv_w, cv_h;
 static int32_t cv_oy;            /* y offset for graph drawing */
 static int32_t cv_y0, cv_y1;     /* X0X: the rows drawing may touch (cv_band) */
+static int32_t cv_cx0, cv_cx1;   /* SiDJ: the columns text may touch (a scrolled title) */
 
 #define RGB(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 #define C_BLACK 0x0000u
 #define C_WHITE 0xFFFFu              /* accent only: what is being touched / where we are */
 #define C_RMX RGB(255, 204, 40)      /* SiDJ: remixed, changed from the tune (gold: apart from voice 1's
                                       * green and from white), and nothing else */
-/* The screen's five steps, darkest to brightest, plus white (SiDJ: one theme, DEBUT). */
-typedef struct {
-    const char *name;
-    uint16_t c[5];
-    const uint16_t *voice;       /* 0, or the line and glow colours of voices 1, 2, 3 (six entries) */
-} palette_t;
-/* X0X: the first three steps are neutral greys in every theme (structure: rules, empty cells,
- * labels); only the two brightest carry the theme's hue (values, highlights). Colour on the
- * screen then means something: a part, a value, an alarm. */
-#define NEUTRALS RGB(34, 34, 40), RGB(74, 74, 82), RGB(150, 150, 158)
-/* DEBUT: a colour per voice after tubesockor's "Debut & Credit" video (green, red, blue scopes,
- * each a thin bright line with a glow of its own hue hanging below it); the rest white on black */
-static const uint16_t DEBUT_VOICES[6] = {
-    RGB(130, 235, 130), RGB(36, 150, 60),       /* voice 1: pale green, a green glow */
-    RGB(240, 54, 60), RGB(150, 22, 36),         /* voice 2: red */
-    RGB(70, 90, 255), RGB(34, 44, 225),         /* voice 3: blue */
-};
-static const palette_t PALETTES[] = {
-    {"DEBUT", {NEUTRALS, RGB(196, 196, 202), RGB(236, 236, 240)}, DEBUT_VOICES},
-};
-#define NPALETTES (sizeof(PALETTES) / sizeof(PALETTES[0]))
-static uint16_t pal[5];
+/* SiDJ's colours. Five steps, darkest to brightest: the first three neutral greys for structure
+ * (rules, empty cells, labels), the two brightest for values and highlights (after X0X). Colour
+ * on the screen then means something: a voice, a value, an alarm. */
+static const uint16_t pal[5] = {RGB(34, 34, 40), RGB(74, 74, 82), RGB(150, 150, 158), RGB(196, 196, 202), RGB(236, 236, 240)};
 #define C_LINE pal[0]                /* 1 rules, separators */
 #define C_DIM pal[1]                 /* 2 inactive, empty steps, units */
 #define C_GRAY pal[2]                /* 3 labels */
 #define C_AMB pal[3]                 /* 4 secondary text */
 #define C_HI pal[4]                  /* 5 values, curves */
+/* a colour per voice after tubesockor's "Debut & Credit" video (green, red, blue scopes, each a
+ * thin bright line with a glow of its own hue hanging below it): the line, then the glow */
+static const uint16_t VOICE_COLOURS[6] = {
+    RGB(130, 235, 130), RGB(36, 150, 60),       /* voice 1: pale green, a green glow */
+    RGB(240, 54, 60), RGB(150, 22, 36),         /* voice 2: red */
+    RGB(70, 90, 255), RGB(34, 44, 225),         /* voice 3: blue */
+};
 
 /* the voices' colours: the line (values, the scope), a mid tone (bars), and the scope's glow,
- * a fade from the glow colour to black over GLOW_N rows below the line (none: vc_glow 0) */
+ * a fade from the glow colour to black over GLOW_N rows below the line (colours_init) */
 #define GLOW_N 14
 static uint16_t vc_line[3], vc_mid[3], vc_grad[3][GLOW_N];
-static uint8_t vc_glow;
 
 static uint16_t rgb_scale(uint16_t c, uint32_t q8)  /* an RGB565 colour times q8 / 256 */
 {
@@ -65,19 +54,15 @@ static uint16_t rgb_scale(uint16_t c, uint32_t q8)  /* an RGB565 colour times q8
     return (uint16_t)(r << 11 | g << 5 | b);
 }
 
-static void palette_set(uint32_t i)
+static void colours_init(void)
 {
-    const palette_t *p = &PALETTES[i % NPALETTES];
     uint32_t k, v;
-    for (k = 0; k < 5u; k++)
-        pal[k] = p->c[k];
-    vc_glow = p->voice != 0;
     for (v = 0; v < 3u; v++) {
-        vc_line[v] = p->voice ? p->voice[v * 2] : pal[4];
-        vc_mid[v] = p->voice ? rgb_scale(p->voice[v * 2], 170) : pal[3];
+        vc_line[v] = VOICE_COLOURS[v * 2];
+        vc_mid[v] = rgb_scale(VOICE_COLOURS[v * 2], 170);
         for (k = 0; k < GLOW_N; k++) {                  /* bright under the line, a quadratic fall */
             uint32_t f = (uint32_t)(GLOW_N - k) * 256u / GLOW_N;
-            vc_grad[v][k] = p->voice ? rgb_scale(p->voice[v * 2 + 1], f * f / 256u * 220u / 256u) : 0;
+            vc_grad[v][k] = rgb_scale(VOICE_COLOURS[v * 2 + 1], f * f / 256u * 220u / 256u);
         }
     }
 }
@@ -94,6 +79,8 @@ static void cv_begin(uint32_t w, uint32_t h, uint16_t bg)
     cv_h = h;
     cv_oy = cv_y0 = 0;
     cv_y1 = (int32_t)h;
+    cv_cx0 = 0;
+    cv_cx1 = (int32_t)w;
     n = w * h;
     for (i = 0; i < n; i++)
         cv_px[i] = swap16(bg);
@@ -189,7 +176,7 @@ static int32_t cv_text(int32_t x, int32_t y, const felucca_font_t *f, const char
                 uint32_t a = gd[gy * bpr + gx / 2u];
                 int32_t px = x - f->pad + (int32_t)gx, py = y + (int32_t)gy + cv_oy;
                 a = (gx & 1u) ? (a & 15u) : (a >> 4);
-                if (!a || (uint32_t)px >= cv_w || py < cv_y0 || py >= cv_y1)
+                if (!a || px < cv_cx0 || px >= cv_cx1 || py < cv_y0 || py >= cv_y1)
                     continue;
                 if (a == 15u) {
                     cv_px[(uint32_t)py * cv_w + (uint32_t)px] = swap16(c);

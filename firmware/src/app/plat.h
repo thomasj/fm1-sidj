@@ -38,7 +38,8 @@ int plat_midi_out_free(void);               /* packets the out ring takes now (0
  * out when that frame plays, not when it is rendered (a block's bytes would leave together) */
 void plat_midi_rt(uint8_t b, uint32_t frame);
 /* the MIDI clock coming in (USB or the jack): each pulse's time in ticks, numbered from the last
- * Start (PLAT_CLK_FREE between Stop and Continue: not counted); a Start itself as PLAT_CLK_START,
+ * Start (PLAT_CLK_FREE before the first Start or Continue, and between Stop and Continue: not
+ * counted); a Start itself as PLAT_CLK_START,
  * a Stop as PLAT_CLK_STOP;
  * and when frame `frame` of the block eng_render is rendering will play, in the same ticks. A full
  * queue keeps its newest entry the latest pulse */
@@ -48,6 +49,7 @@ void plat_midi_rt(uint8_t b, uint32_t frame);
 #define PLAT_CLK_STOP 0xFFFFFFFDu
 int plat_clock_in(uint32_t *t, uint32_t *k);   /* 1 = got one */
 uint32_t plat_frame_ticks(uint32_t frame);
+uint32_t plat_out_ticks(void);              /* about how long until audio rendered now is heard (ticks) */
 uint32_t plat_ticks(void);
 void plat_keepalive(void);                  /* a long job in the main loop (the MIDI clock's beat): the watchdog fed */
 
@@ -55,10 +57,9 @@ void plat_keepalive(void);                  /* a long job in the main loop (the 
 int plat_store_load(uint32_t obj, void *dst, uint32_t max);    /* bytes loaded, < 0 = none / bad */
 int plat_store_save(uint32_t obj, const void *src, uint32_t len);   /* 0 = ok */
 #define PLAT_STORE_MAX 3840u
-enum { OBJ_SET, OBJ_SOUND, OBJ_PAT0, OBJ_PAT1, OBJ_PANEL, OBJ_SONG, OBJ_MOTION, OBJ_NOBJ };
-/* flash (storage.c): OBJ_SET 0xFC000; SOUND / PAT0 / PAT1 / SONG 0x97000.. (2 sectors each);
- * OBJ_PANEL 0xDC000, OBJ_MOTION 0xDE000. SiDJ uses SET (settings) and
- * PANEL (the calibration); SOUND, PAT0, PAT1, SONG and MOTION are unused here. */
+enum { OBJ_SET, OBJ_SOUND, OBJ_PANEL = 4, OBJ_NOBJ };  /* (the values SiDJ 1.3 saved them under) */
+/* flash (storage.c), 2 sectors each: OBJ_SET 0xFC000 (settings), OBJ_SOUND 0xF3000 (the kept
+ * clocks), OBJ_PANEL 0xF5000 (the calibration). */
 
 /* audio load in % of the render budget, and dropped half buffers since boot */
 uint32_t plat_cpu_pct(void);

@@ -56,8 +56,8 @@ for voice 1, 2 or 3.
 | `KNOB 3` | USB audio: the mix, or the mix and the three voices |
 | `SAVE` | keep these settings, and this song as the one selected at power-on |
 
-The list is grouped by composer, with each song's length from HVSC. The FM-1 holds a few
-dozen tunes at a time (240 KB). Add and remove them from the
+The list is grouped by composer, with each song's length from HVSC. The FM-1 holds over a hundred
+typical HVSC tunes at a time (384 KB, compressed). Add and remove them from the
 [web page](https://thomasj.github.io/fm1-sidj/#songs), or with `tools/fm1_sid.py` (below).
 
 SiDJ plays PSID and RSID tunes for one SID, multi-speed tunes up to at least 38x included.
@@ -85,7 +85,8 @@ A song stops at its end and waits: `SELECT` for the next, `PLAY` to hear it agai
 
 The remix changes what reaches the chip, never the tune itself. Whatever you change turns
 **gold** on screen, with REMIX in the top bar. `OCT-` and `OCT+` pressed together put
-everything back. Loading a song starts clean.
+everything back. Another song starts clean; the same song started again, or another of its
+subsongs, keeps the remix.
 
 **Voices and keys**
 
@@ -140,8 +141,8 @@ Drums keep sounding like drums: a voice playing pure noise keeps its waveform an
 | `GLO` | tempo, 25 to 150 % | vinyl fader, ±8 % | SID+CLK: the clock's offset | SID+CLK: the clock's tempo put right, or set by hand |
 
 Each voice has its own LFO. The tempo speeds the tune up without changing its pitch; the vinyl
-fader moves both, like a turntable. A new song or subsong starts at 100 % with the fader at 0,
-as the rest of the remix starts clean. RSID tunes, which drive the whole C64 themselves, play
+fader moves both, like a turntable. Another song starts at 100 % with the fader at 0, as the
+rest of the remix starts clean. RSID tunes, which drive the whole C64 themselves, play
 as written: no tempo, fader or LFOs.
 
 **MIDI.** A MIDI controller can play the whole remix too, with a CC for every control above.
@@ -170,9 +171,9 @@ play on the emulated SID.
 
 **SID+CLK** plays the emulated SID and sends a MIDI clock over USB, its beat found in the tune
 itself. On the `GLO` page, `KNOB 4` puts a wrong tempo right (or sets one when none is found) and
-`KNOB 3` moves the clock; `GLO` & `PLAY` clicks on the beats. A clock coming in over USB or the
-MIDI IN jack starts, stops and continues the song, and with SID+CLK the tune follows it. More in
-[SiDJ over MIDI](docs/midi.md#midi-clock).
+`KNOB 3` moves the clock; `GLO` & `PLAY` turns a click on the beats on or off (off at each
+start). A clock coming in over USB or the MIDI IN jack starts, stops and continues the song, and
+with SID+CLK the tune follows it. More in [SiDJ over MIDI](docs/midi.md#midi-clock).
 
 # Installing
 
@@ -192,11 +193,19 @@ and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the ch
 `tools/fm1_rescue.sh` puts the official firmware back, and Leo Kuroshita's
 [FM-1 Transporter](https://github.com/kurogedelic/FM-1-transporter) is the last resort.
 
-**Other firmwares' data.** SiDJ keeps its songs in the flash area where Felucca and the
-firmwares built on it keep their user samples (0xA0000 to 0xDBFFF). Adding songs erases what
+**Other firmwares' data.** SiDJ keeps its songs from 0x93000 to 0xF2FFF, over the flash where
+Felucca and the firmwares built on it keep their samples and projects. Adding songs erases what
 another firmware saved there, and other firmwares cannot read SiDJ's songs. SiDJ ignores
 anything in the area that is not a SiDJ song. Back up your samples and projects before you
-install SiDJ. Going the other way, save a setlist on the web page (step 2) before you install
+install SiDJ.
+
+**M-VAVE's patches.** From 0xEA000 up is where M-VAVE's firmware keeps its patches. SiDJ uses it
+for the last part of the song store, its own records and updates, so patches you saved on the
+official firmware can be lost. V16 kept its factory sounds when I tested this on my FM-1. On an
+FM-1 that never had V16, V15's factory patches can be lost for good, though V16, M-VAVE's current
+firmware, brings its own.
+
+**Going to another firmware.** Save a setlist on the web page (step 2) before you install
 another firmware: it keeps every song, its order and song lengths in one .zip, and Load setlist
 puts them back. The page also keeps a copy in the browser and offers it back when it finds the
 FM-1 empty.
@@ -212,7 +221,7 @@ FM-1 empty.
 .venv/bin/python3 tools/fm1_sid.py put ~/Music/C64Music/MUSICIANS/G/Galway_Martin/    # a whole folder
 .venv/bin/python3 tools/fm1_sid.py play 3 2                                            # song 3, subsong 2
 .venv/bin/python3 tools/fm1_sid.py delete 3
-.venv/bin/python3 tools/fm1_sid.py compact      # reclaim the space deleted songs leave
+.venv/bin/python3 tools/fm1_sid.py compact      # reclaim the space deleted songs leave, and compress older songs
 .venv/bin/python3 tools/fm1_sid.py stats 10     # the audio load, once a second
 ```
 
@@ -249,9 +258,9 @@ jack off, `SIDJ_CDC=1` adds a USB serial console.
 `tools/make_site.py build/sidj-1.0.0.fwsc` builds the web site around a package, in
 `build/site`. The browser emulator also takes a song from another page: opened as `emu/#import`,
 it tells the page that opened it that it is ready, takes one .sid from it, adds it to its songs
-and plays it when switched on. SID Factory II Pocket's page uses it to open a song composed on the
-FM-1 in SiDJ, ready to play and remix. `tools/release.sh X.Y.Z` makes a public release: the package, the tests, one
-commit on the public repository, the GitHub release and the site.
+and plays it when switched on, ready to play and remix. `tools/release.sh X.Y.Z` makes a public
+release: the package, the tests, one commit on the public repository, the GitHub release and the
+site.
 
 ## How it works
 

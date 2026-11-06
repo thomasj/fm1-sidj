@@ -72,6 +72,7 @@ static struct {
     uint32_t enc_t[NE];
     char msg[48];
     uint32_t msg_until;
+    uint32_t hint_until;                    /* SID+CLK just picked: its click's shortcut on the status line */
     uint8_t dirty_top, dirty_list, dirty_voices, dirty_filter, dirty_status;
     uint32_t top_at, voices_at, filter_at, status_at;
     uint32_t top_sig;                       /* the remix state the top bar shows (redrawn when it moves) */
@@ -79,6 +80,10 @@ static struct {
     uint8_t detecting;                      /* that load finds the tempo first (SID+CLK): the main loop waits in it */
     uint8_t clk_saved;                      /* that load takes the song's kept clock (clkstore.c) */
     uint8_t ended;                          /* the song ran past its length */
+    uint8_t beat1;                          /* the next load is a MIDI Start's: the tune from its first beat */
+    int file_k;                             /* the song whose file eng_file holds, unpacked (-1: none) */
+    uint8_t scrolling;                      /* the Player's title or composer is too long and scrolls */
+    uint32_t scroll_t0;                     /* when that song loaded: where the scroll is */
     uint32_t lit_keys;
 } ui;
 #define NLANES 17                           /* the keys' sources: MIDI channels 1 .. 16, the FM-1's keys */
@@ -157,31 +162,42 @@ static void ui_say_output(void)             /* the output turned; an RSID never 
     int shown = eng_loaded && (ui.mode == UI_PLAYER || ui.sel == ui.cur);   /* the song on screen is the one loaded */
     if (set.output && shown && eng_deck_off) ui_say(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
     else if (set.output == ENG_OUT_CLOCK && shown && eng_playing && !eng_clk_tried) ui_say("SID + MIDI CLOCK: FROM THE NEXT LOAD", 0);
+    else if (set.output == ENG_OUT_CLOCK) { ui.msg_until = 0; ui.hint_until = plat_ms() + 4000u; ui.dirty_status = 1; }
     else ui_say("OUTPUT: ", OUT_NAME[set.output]);
 }
 
 /* ------------------------------------------------------------ loading --- */
 static int ui_load(int k, int subsong, int play)   /* play 0: loaded, ready for PLAY; 2: the same song again, from the start */
 {
-    uint32_t size = 0, i;
+    uint32_t size = 0;
     const uint8_t *f = song_file(k, &size, 0, 0);
     sidfile_t sf;
     uint8_t opts;
+    int again;
     if (!f || eng_file.pending || size > ENG_FILE_MAX) return -1;
     if (!song_file_ok(k)) { ui_say("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }   /* (not played: it could crash) */
     if (sidfile_parse(&sf, f, size)) { ui_say("NOT A SID FILE", 0); return -1; }
     if (sf.basic) { ui_say("BASIC TUNE: NOT SUPPORTED", 0); return -1; }
     if (sidfile_nsids(&sf) > 1) { ui_say(sidfile_nsids(&sf) == 2 ? "2SID TUNE: NOT SUPPORTED" : "3SID TUNE: NOT SUPPORTED", 0); return -1; }
-    for (i = 0; i < size; i++) eng_file.data[i] = f[i];
-    eng_file.len = size;
+    if (k != ui.file_k) {   /* (unpacked here, in the main loop: the audio carries on; the same song again: as it is) */
+        int got;
+        ui.file_k = -1;
+        got = song_load(k, eng_file.data, ENG_FILE_MAX);
+        if (got < 0) { ui_say("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }
+        eng_file.len = (uint32_t)got;
+        ui.file_k = k;
+    }
     __asm__ volatile("" ::: "memory");      /* the file is complete before the flag says so */
     ui.nsongs = sf.songs;
     if (subsong < 1 || subsong > sf.songs) subsong = sf.start_song;
     ui.subsong = subsong;
+    again = k == ui.cur;                    /* the same song again: its remix stays */
     ui.cur = k;
+    ui.scroll_t0 = plat_ms();
     memset(lane, 0, sizeof lane);           /* a new song starts clean: the held keys are let go */
     ui.ended = 0;
-    opts = (uint8_t)(set.model << 2 | (play ? 0 : ENG_LOAD_PAUSED) | (play == 2 ? ENG_LOAD_AGAIN : 0));   /* the clock: always the file's */
+    opts = (uint8_t)(set.model << 2 | (play ? 0 : ENG_LOAD_PAUSED) | (play == 2 ? ENG_LOAD_AGAIN : 0) | (again ? ENG_LOAD_REMIX : 0) | (ui.beat1 ? ENG_LOAD_BEAT1 : 0));   /* the clock: always the file's */
+    ui.beat1 = 0;
     ui.clk_saved = 0;
     if (set.output == ENG_OUT_CLOCK && play && !sf.rsid && !(play == 2 && eng_clk_tried))
         ui.clk_saved = (uint8_t)cs_preset(k, subsong);   /* the song's kept clock: no look */
@@ -260,13 +276,14 @@ static void ui_next_song(int d)             /* the player's SELECT: the next or 
 static void ui_init(void)
 {
     memset(&ui, 0, sizeof ui);
+    ui.file_k = -1;
     cs_init();
     eng_clk_click = set.clk_click;
     ui.cur = -1;
     ui.voice_held = -1;
     memset(lane, 0, sizeof lane);
     ui.sel = set.song < song_count ? set.song : 0;
-    palette_set(0);                         /* DEBUT */
+    colours_init();
     eng_post(EV_OUTPUT, set.output, 0, 0);
     ui.dirty_top = ui.dirty_list = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
     lcd_fill(0, 0, 240, 240, C_BLACK);
@@ -425,8 +442,10 @@ static void ui_midi_start(void)            /* MIDI Start: the song on screen fro
 {
     int k = ui.mode == UI_PLAYER && ui.cur >= 0 ? ui.cur : ui.sel;
     if (!song_count || k < 0) return;
+    ui.beat1 = 1;                           /* (SID+CLK: on the clock's beat 1, its own) */
     if (k == ui.cur && eng_loaded) { if (ui_load(k, ui.subsong, 2)) return; }   /* (the tempo found kept) */
     else if (ui_load(k, 0, 1)) return;
+    ui.beat1 = 0;
     ui.sel = k;
     if (ui.mode != UI_PLAYER) { ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui_detect_note(); }
 }
@@ -829,11 +848,33 @@ static uint32_t remix_sig(void)             /* what the top bar shows of it */
 static void draw_logo_small(int x, int y, int cell);   /* (with the intro's logo, below) */
 static uint16_t mix565(uint16_t a, uint16_t b, uint32_t q8);
 
+/* a title or composer wider than its room: still for 2 s, then 20 pixels a second to its end, still
+ * for 2 s, back to the start; how far it has moved now */
+#define SCROLL_HOLD 2000u
+#define SCROLL_MS_PX 50u
+static int32_t scroll_px(int32_t over)
+{
+    uint32_t run = (uint32_t)over * SCROLL_MS_PX, t = (plat_ms() - ui.scroll_t0) % (2u * SCROLL_HOLD + run);
+    if (over <= 0 || t < SCROLL_HOLD) return 0;
+    return t < SCROLL_HOLD + run ? (int32_t)((t - SCROLL_HOLD) / SCROLL_MS_PX) : over;
+}
+
+/* text in columns x0 .. x1-1, scrolled when it is wider */
+static void draw_scrolled(int32_t x0, int32_t x1, int32_t y, const felucca_font_t *f, const char *s, uint16_t c)
+{
+    int32_t over = text_w(f, s) - (x1 - x0);
+    if (over > 0) ui.scrolling = 1;
+    cv_cx0 = x0; cv_cx1 = x1;
+    cv_text(x0 - scroll_px(over), y, f, s, c);
+    cv_cx0 = 0; cv_cx1 = (int32_t)cv_w;
+}
+
 static void draw_top(void)                  /* rows 0 .. 35 */
 {
     char b[48], t[16];
     const uint8_t *nm = ui.cur >= 0 ? song_hvsc_name(ui.cur) : 0;
     cv_begin(240, 36, C_BLACK);
+    ui.scrolling = 0;
     if (ui.mode == UI_SONGS) {
         int used = (int)((song_end - SONG_POOL_BASE) * 100u / SONG_POOL_SIZE);
         int32_t mx;
@@ -882,10 +923,9 @@ static void draw_top(void)                  /* rows 0 .. 35 */
                 cv_text(rx0, 2, &FONT_XS, "REMIX", C_BLACK);
                 lim = rx0 - 3 - 8;
             }
-            ui_hvsc_str(b, nm, 30);         /* the title up to them */
-            if (text_w(&FONT_B, b) > lim) { int n = 30; while (n > 0 && text_w(&FONT_B, b) > lim) b[--n] = 0; }
+            ui_hvsc_str(b, nm, 32);         /* the title up to them, scrolled when longer */
+            draw_scrolled(6, lim, 2, &FONT_B, b, C_HI);
         }
-        cv_text(6, 2, &FONT_B, b, C_HI);
         cv_text(nx, 2, &FONT_S, t, ui.nsongs > 1 ? C_WHITE : C_GRAY);
         if (eng_loaded)                     /* playing, paused, or ended (at the song's end or a crash) */
             draw_transport(tx, 5, eng_playing ? 0 : ui.ended ? 2 : 1, eng_playing ? C_HI : C_WHITE);
@@ -921,9 +961,8 @@ static void draw_top(void)                  /* rows 0 .. 35 */
                     cv_text(rx0, 20, &FONT_XS, "T", C_DIM);
                 }
             }
-            ui_hvsc_str(b, nm + HVSC_AUTHOR, 30);
-            if (text_w(&FONT_XS, b) > rx0 - 8) { int n = 30; while (n > 0 && text_w(&FONT_XS, b) > rx0 - 8) b[--n] = 0; }
-            cv_text(6, 20, &FONT_XS, b, C_AMB);
+            ui_hvsc_str(b, nm + HVSC_AUTHOR, 32);
+            draw_scrolled(6, rx0 - 8, 20, &FONT_XS, b, C_AMB);
         }
     }
     cv_rect(0, 35, 240, 1, C_LINE);
@@ -1212,7 +1251,7 @@ static void draw_scope(int x, int y, int w, int h, int v)
         for (k = k0 + 1; k < k1; k++) { int32_t s = SC(k); if (s < lo) lo = s; if (s > hi) hi = s; }
 #define SY(s) (mid - (int)(((((s) - off) * g) >> 8 > 32767 ? 32767 : (((s) - off) * g) >> 8 < -32767 ? -32767 : (((s) - off) * g) >> 8) * half / 32768))
         yh = SY(hi); yl = SY(lo); yf = SY(SC(k0)); yl2 = SY(SC(k1 - 1));
-        if (vc_glow) {                      /* the glow first: a fade hanging below the top */
+        {                                   /* the glow first: a fade hanging below the top */
             int j;
             for (j = 0; j < GLOW_N && yh + 1 + j < y + h; j++) cv_pset(x + i, yh + 1 + j, vc_grad[v][j]);
         }
@@ -1371,6 +1410,9 @@ static void draw_status(void)               /* rows 216 .. 239 */
     cv_begin(240, 24, C_BLACK);
     if (now < ui.msg_until) {
         cv_text(4, 4, &FONT_S, ui.msg, C_WHITE);
+    } else if (now < ui.hint_until && set.output == ENG_OUT_CLOCK) {   /* as the knobs' fields */
+        int px = st_field(4, "OUT", "SID + MIDI CLOCK", C_WHITE);
+        st_field(px + 6, "GLO+PLAY", "CLICK", C_GRAY);
     } else if (ui.mode == UI_SONGS) {
         int px = 4;                         /* the settings by their knobs, SAVE keeps them */
         if (set.model == 0) {               /* the file's: the selected song's chip, and AUTO */
@@ -1629,6 +1671,8 @@ static void ui_frame(void)                  /* ~60 times a second */
         }
     }
     ui.activity = 0;
+    if (eng_file.pending) { ui_leds(); return; }   /* a load on its way: the main loop gets to it first, the
+                                             * screen after (a MIDI Start sounds at once) */
     if (ui.load_wait && !eng_file.pending) {
         ui.load_wait = 0;
         ui.detecting = 0;
@@ -1659,7 +1703,7 @@ static void ui_frame(void)                  /* ~60 times a second */
         if (ui.dirty_top || now - ui.top_at > 1000u) { ui.dirty_top = 0; ui.top_at = now; draw_top(); }
         if (ui.dirty_list) { ui.dirty_list = 0; draw_list(); }
     } else {
-        if (ui.dirty_top || now - ui.top_at > 500u || remix_sig() != ui.top_sig) { ui.dirty_top = 0; ui.top_at = now; draw_top(); }
+        if (ui.dirty_top || now - ui.top_at > (ui.scrolling ? SCROLL_MS_PX : 500u) || remix_sig() != ui.top_sig) { ui.dirty_top = 0; ui.top_at = now; draw_top(); }
         if (ui.dirty_voices || now - ui.voices_at >= 33u) { ui.dirty_voices = 0; ui.voices_at = now; draw_voices(); }
         if (ui.dirty_filter || now - ui.filter_at > 100u) { ui.dirty_filter = 0; ui.filter_at = now; draw_filter(); }
     }
@@ -1675,5 +1719,6 @@ static void songs_changed(void)
     if (ui.sel >= song_count) ui.sel = song_count ? song_count - 1 : 0;
     song_ord_n = -1;                        /* the list's order again */
     ui.cur = -1;                            /* the index moved: the loaded entry is unknown */
+    ui.file_k = -1;
     ui.dirty_top = ui.dirty_list = 1;
 }

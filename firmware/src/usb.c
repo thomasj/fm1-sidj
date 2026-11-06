@@ -153,7 +153,7 @@ static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 #endif
 static uint32_t ci_t[CQ], ci_k[CQ], ci_n;
 static volatile uint32_t ci_w, ci_r;
-static uint8_t ci_stopped;
+static uint8_t ci_stopped = 1;                         /* SiDJ: not counted until a Start or Continue */
 static void clock_in(uint32_t b)
 {
     uint32_t k;

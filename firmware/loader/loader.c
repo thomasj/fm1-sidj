@@ -49,6 +49,7 @@ static uint32_t ota_now_ms(void) { return ldr_ms(); }
 static void ota_idle(void) { ldr_poll(); }
 /* step-1 hooks of ota.c: not used by the loader */
 static int ota_erase(uint32_t off) { (void)off; return -1; }
+static int ota_erase_any(uint32_t off) { (void)off; return -1; }
 static int ota_prog(uint32_t off, const void *p, uint32_t n) { (void)off; (void)p; (void)n; return -1; }
 static int ota_fread(uint32_t off, void *p, uint32_t n) { return fl_read_ram(off, p, n); }
 static void ota_show(uint32_t step, int32_t code) { (void)step; (void)code; }

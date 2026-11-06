@@ -51,6 +51,7 @@ void plat_midi_rt(uint8_t b, uint32_t frame)
     rt_w++;
 }
 uint32_t plat_frame_ticks(uint32_t frame) { return rt_t0 + (HALF_FRAMES + rt_block + frame) * RT_TICKS_PER_FRAME; }
+uint32_t plat_out_ticks(void) { return (HALF_FRAMES + HALF_FRAMES / 2u) * RT_TICKS_PER_FRAME; }   /* the next render (half a buffer on average), then a buffer */
 static void rt_service(void)                /* TIMER5: the bytes due */
 {
     uint32_t now = fm1_ticks();
@@ -304,10 +305,12 @@ static void fm1_main(void)
         if (flash_ok) {
             fl_plain_window_init();         /* the song slots read as plaintext through XIP */
             ota_boot_cleanup();
+            st_migrate(OBJ_SOUND, song_rx);  /* (an older SiDJ's, before the song pool takes the old place) */
+            st_migrate(OBJ_PANEL, song_rx);
         }
     }
     lcd_init();
-    palette_set(0);
+    colours_init();
     lcd_fill(0, 0, 240, 240, C_BLACK);      /* black until the UI's intro starts */
     if (dbg.magic != DBG_MAGIC) {
         memset(&dbg, 0, sizeof dbg);
@@ -409,8 +412,10 @@ static void fm1_main(void)
         if (usb.ota_req) {
             usb.ota_req = 0;
             flash_quiet(0);                 /* faded out before the staging's erases */
-            if (flash_ok)
+            if (flash_ok) {
+                cs_flush();                 /* kept clocks not yet written (a song still playing) */
                 ota_session();              /* returns only if nothing was committed */
+            }
             lcd_fill(0, 0, 240, 240, C_BLACK);
             ui_init();
         }

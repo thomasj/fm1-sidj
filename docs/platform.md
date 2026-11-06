@@ -27,8 +27,13 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
 - **Flash**: 1 MiB SPI NOR (JEDEC 0x856014), 4 KiB sectors, 256 B pages. Code and rodata run
   in place (XIP) through a 32 B-line cache; flash offset `off` appears at
   `0x02000000 + off - 0x4000`. App slot 0x4000-0x93000 (app.bin at +0x120, max 581,564 B),
-  SFC-encrypted with chip key 0x980F. Above 0x93000: VM region, Felucca's data
-  0x97000-0xE0000, OTA staging 0xE0000-0xE5000, settings 0xFC000-0xFF000.
+  SFC-encrypted with chip key 0x980F. Above 0x93000 the firmwares differ: Felucca's data
+  0x97000-0xE0000 and OTA staging 0xE0000-0xE5000, SiDJ's map in [design.md](design.md), settings
+  0xFC000-0xFF000. M-VAVE's own: `USR` 0xEA000-0xFBFFF on V15 and `USER` 0xED000-0xFEFFF on V16 hold
+  its patches, and official updates leave them. Tested on one FM-1 with 0xE5000-0xFBFFF overwritten or
+  erased: V16 starts with its factory sounds, which come from `DX7.bin` in its own image, and
+  rewrites 0xE5000-0xEFFFF itself. V15's package has no copy of its patches; V15's were already wrong
+  on that unit, which had run V16, and random data there changed nothing further.
 - **Caches**: 32 KiB I-cache, 32 KiB D-cache; 578 KiB SRAM and a second core per the SDK,
   unused by Felucca.
 - **Costs to know**: a divide is one instruction but many cycles, so keep it out of per-sample
@@ -96,8 +101,8 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
   `FM-1_64XXYYZZ`: 64 is SiDJ's own prefix, apart from every other firmware's, see
   [thefirmwarehub.com](https://thefirmwarehub.com/kb/)).
 - Install over USB-MIDI SysEx (`tools/fm1_install.py`, `src/ota.c`): the running app stages
-  the RAM-only loader (`firmware/loader/`) at 0xE0000, writes an update record, resets; the
-  SPL runs the loader, which pulls the image from the host in 512 B reads and writes sectors
+  the RAM-only loader (`firmware/loader/`) at 0xF7000 (Felucca: 0xE0000; the record names the
+  place), writes an update record, resets; the SPL runs the loader, which pulls the image from the host in 512 B reads and writes sectors
   0x4000-0x93000, verifying each. M-VAVE's packages go back the same way with their own loader
   (V15's and V16's are the same), which rewrites the whole flash image head included: V15's is
   0x93000 bytes, V16's 0xA9000 (into the song store), and their heads differ, so `ota.c` takes a
@@ -131,7 +136,7 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
 `fm1_cstart`, `fm1_main`, `fm1_timer5_irq`, `fm1_alnk0_irq`, `fm1_fault`, the audio buffer,
 and the hooks of the platform files it includes (`usb.c`: `fm1_ms`, `RING_PUBLISH`,
 `HALF_FRAMES`, the `FELUCCA_*` switches, `bootguard`; `storage.c`: `st_read/erase/prog`;
-`ota.c`: `ota_*` hooks; `gfx.c`: fonts, palettes, `lcd_*`).
+`ota.c`: `ota_*` hooks; `gfx.c`: fonts, colours, `lcd_*`).
 
 Minimal platform file set from Felucca: `app.ld`, `crt0.S`, `hal/*.h`, `hal/*.S`,
 `src/{libc,lcd,gfx,usb}.c`, optionally `panel.c`, `midi_uart.c`, `storage*.c`, `ota*.c`,

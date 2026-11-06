@@ -64,13 +64,14 @@ key 8 up
 SCN
 build/host/sidj_host "$out/site.in" "$out" > "$out/site.log"
 # the song list: the songs on the FM-1, in the order added
-.venv/bin/python3 - "$H" > "$out/songs.in" <<'PY'
+.venv/bin/python3 - "$H" "$out" > "$out/songs.in" <<'PY'
 import sys
 sys.path.insert(0, "tools")
 import fm1_sid
 h = sys.argv[1]
 sl = fm1_sid.Songlengths(h)
 m = h + "/MUSICIANS/"
+n = 0
 for f in [m + "H/Hubbard_Rob/Commando.sid", "web/site/songs/Debut_and_Credit.sid", "web/site/songs/TwinCross.sid",
           m + "G/Galway_Martin/Wizball.sid", m + "T/Tel_Jeroen/Cybernoid_II.sid", m + "D/Daglish_Ben/Last_Ninja.sid",
           m + "G/Galway_Martin/Parallax.sid", m + "F/Follin_Tim/Black_Lamp.sid", m + "S/Shogoon/Circles.sid",
@@ -80,7 +81,15 @@ for f in [m + "H/Hubbard_Rob/Commando.sid", "web/site/songs/Debut_and_Credit.sid
           m + "T/The_Syndrom/Wanted_or_Needed.sid", m + "D/Danko_Tomas/Wonderland_X_Introtune.sid",
           m + "S/Swallow/Wonderland_X_part_1.sid", m + "L/LFT/A_Mind_Is_Born.sid", m + "L/LFT/Hardsync.sid",
           m + "L/LFT/Elvendance.sid", m + "S/Shogoon/Ballad_for_Jeff.sid", m + "T/Tel_Jeroen/Supremacy.sid"]:
-    print("sid", f, *sl.lookup(open(f, "rb").read())[1])
+    data = open(f, "rb").read()
+    z = fm1_sid.pack_song(data)
+    if z:                                    # compressed, as the tools send them: the meter as on an FM-1
+        n += 1
+        path = f"{sys.argv[2]}/z{n}.bin"
+        open(path, "wb").write(z)
+        print("sidz", path, len(data), *sl.lookup(data)[1])
+    else:
+        print("sid", f, *sl.lookup(data)[1])
 PY
 cat >> "$out/songs.in" <<SCN
 wait 4500

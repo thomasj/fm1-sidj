@@ -1,0 +1,30 @@
+# A clock that comes in without running (never started, or after a Stop: pulses that are not
+# counted) sets the tempo alone: the song played from the panel goes at the clock's tempo from its
+# first beat, with no catching up to a bar. Once the clock runs (Start) the beats line up with its bars
+sid @SID1@
+turn K2 3
+wait 1000
+clockin 140 1
+wait 2000
+tap PLAY
+wait 4000
+expect playing 1
+expect follow_speed >4530
+expect follow_speed <4620
+wait 2000
+expect follow_speed >4530
+expect follow_speed <4620
+midi fa 0 0
+wait 4000
+expect follow_err <40
+midi fc 0 0
+wait 500
+expect playing 0
+tap PLAY
+wait 300
+expect playing 1
+expect follow_speed >4530
+expect follow_speed <4620
+wait 2000
+expect follow_speed >4530
+expect follow_speed <4620

@@ -17,10 +17,9 @@
 #define ST_PAYLOAD_OFF 256u
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
 
-/* flash map, X0X (plat.h OBJ_*): settings 0xFC000 (FL_GLOB); sound, patterns 1-8, patterns 9-16,
- * the song at 0x97000.. (2 sectors each, below the user sample slots at 0xA0000); the panel
- * calibration at 0xDC000 and motion at 0xDE000 (Felucca's user-preset area, unused by X0X). Nothing
- * above 0xDFFFF: 0xE0000.. is the update loader's staging area. */
+/* flash map, SiDJ (plat.h OBJ_*), two sectors each: the kept clocks 0xF3000 and the panel calibration
+ * 0xF5000, above the song pool and below the update loader's staging (0xF7000); the settings
+ * 0xFC000. Up to SiDJ 1.3 the clocks were at 0x97000 and the calibration at 0xDC000: st_migrate. */
 typedef struct {
     uint32_t magic;
     uint16_t type, slot;
@@ -47,17 +46,15 @@ static uint32_t st_crc32(const void *p, uint32_t n)   /* zlib CRC-32, 4 bits per
     return ~c;
 }
 
+static uint8_t st_old;                         /* st_migrate: read where SiDJ 1.3 kept it */
+
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
     if (obj == OBJ_SET)
         return 0xFC000u + copy * ST_SECTOR;
     if (obj == OBJ_PANEL)
-        return 0xDC000u + copy * ST_SECTOR;
-    if (obj == OBJ_MOTION)
-        return 0xDE000u + copy * ST_SECTOR;
-    if (obj == OBJ_SONG)
-        return 0x9D000u + copy * ST_SECTOR;
-    return 0x97000u + (obj - OBJ_SOUND) * 2u * ST_SECTOR + copy * ST_SECTOR;   /* SOUND, PAT0, PAT1 */
+        return (st_old ? 0xDC000u : 0xF5000u) + copy * ST_SECTOR;
+    return (st_old ? 0x97000u : 0xF3000u) + copy * ST_SECTOR;   /* OBJ_SOUND */
 }
 
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4)));
@@ -154,4 +151,16 @@ static int st_save(uint32_t obj, const void *src, uint32_t len)
             return -7;
     }
     return 0;
+}
+
+/* boot: an object saved only at its old place, by an older SiDJ, is copied to the new one. The old
+ * copy stays until the song pool needs its sectors. buf: ST_PAYLOAD_MAX bytes, RAM */
+static void st_migrate(uint32_t obj, void *buf)
+{
+    int n;
+    if (st_load(obj, buf, ST_PAYLOAD_MAX) >= 0) return;
+    st_old = 1;
+    n = st_load(obj, buf, ST_PAYLOAD_MAX);
+    st_old = 0;
+    if (n > 0) st_save(obj, buf, (uint32_t)n);
 }

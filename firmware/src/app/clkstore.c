@@ -3,7 +3,7 @@
  * put right on the GLO page (KNOB 4 its tempo's ratio, KNOB 3 its offset) both settings too (with
  * no tempo found, KNOB 4 sets one by hand: kept until it is turned down to none), and the song's
  * next load in SID+CLK takes them instead of looking for its tempo again. Both turned back to their
- * own (x1, 0 ms) forgets the song: its next load looks again. Kept in OBJ_SOUND (unused by SiDJ otherwise), by the
+ * own (x1, 0 ms) forgets the song: its next load looks again. Kept in OBJ_SOUND, by the
  * file's MD5 and the subsong, so they stay through Tidy up and a setlist loaded again; written at
  * the next quiet moment (a flash write stops the audio). Included by the unity build and the host
  * after songs.c, before ui.c. */
@@ -103,9 +103,13 @@ static void cs_found(int k, int sub)        /* a load found the song's tempo: ke
     cs_dirty = 1;
 }
 
+static void cs_flush(void)                  /* what changed goes to flash now (also before an install) */
+{
+    if (cs_dirty && plat_store_save(OBJ_SOUND, &cs_tab, 8u + cs_tab.count * (uint32_t)sizeof(cs_rec_t)) == 0)
+        cs_dirty = 0;
+}
+
 static void cs_service(void)                /* quiet: what changed goes to flash */
 {
-    if (cs_dirty && !eng_playing && !eng_file.pending &&
-        plat_store_save(OBJ_SOUND, &cs_tab, 8u + cs_tab.count * (uint32_t)sizeof(cs_rec_t)) == 0)
-        cs_dirty = 0;
+    if (!eng_playing && !eng_file.pending) cs_flush();
 }

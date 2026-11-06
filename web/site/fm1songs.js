@@ -14,6 +14,26 @@ export const MAX_LENS = 64, FILE_MAX = 61440;
 const CHUNK = 256;
 const PUT_ERRORS = { 1: "no transfer open", 2: "bytes missing", 3: "CRC mismatch", 4: "too big", 5: "the song store is full", 6: "flash write failed",
                      7: "a 2SID / 3SID tune: SiDJ plays one-SID tunes" };
+const Z_HEAD = 0x7E;                       // a compressed song's plain start: the PSID header and the load address
+
+// raw deflate, as the browser does it (null: this browser has no CompressionStream)
+const zstream = async (bytes, s) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(s)).arrayBuffer());
+async function packSong(bytes) {
+  if (typeof CompressionStream === "undefined" || bytes.length <= Z_HEAD) return null;
+  const z = await zstream(bytes.subarray(Z_HEAD), new CompressionStream("deflate-raw"));
+  if (Z_HEAD + z.length >= bytes.length) return null;
+  const out = new Uint8Array(Z_HEAD + z.length);
+  out.set(bytes.subarray(0, Z_HEAD));
+  out.set(z, Z_HEAD);
+  return out;
+}
+async function unpackSong(stored) {
+  const z = await zstream(stored.subarray(Z_HEAD), new DecompressionStream("deflate-raw"));
+  const out = new Uint8Array(Z_HEAD + z.length);
+  out.set(stored.subarray(0, Z_HEAD));
+  out.set(z, Z_HEAD);
+  return out;
+}
 
 export function pack7(data) {
   const out = [];
@@ -160,7 +180,8 @@ export class Songs {
 
   async info() {
     const r = await this.ask(INFO);
-    return { size: rd(r, 0, 4), used: rd(r, 4, 4), count: r[8] | r[9] << 8, fileMax: r.length >= 14 ? rd(r, 10, 4) : FILE_MAX };
+    return { size: rd(r, 0, 4), used: rd(r, 4, 4), count: r[8] | r[9] << 8, fileMax: r.length >= 14 ? rd(r, 10, 4) : FILE_MAX,
+             version: r.length >= 15 ? r[14] : 1 };
   }
 
   async entry(k) {
@@ -169,7 +190,9 @@ export class Songs {
     const nlen = r[5], lens = [];
     for (let i = 0; i < nlen; i++) lens.push(r[6 + 2 * i] | r[7 + 2 * i] << 8);
     const s = 6 + 2 * nlen;
-    return { k, size: rd(r, 1, 4), lens, name: str32(r, s), author: str32(r, s + 32), released: str32(r, s + 64) };
+    // size: the file's own; stored: what it takes in flash (less when compressed)
+    const stored = rd(r, 1, 4), raw = r.length >= s + 98 ? r[s + 96] | r[s + 97] << 8 : 0;
+    return { k, size: raw || stored, stored, raw, lens, name: str32(r, s), author: str32(r, s + 32), released: str32(r, s + 64) };
   }
 
   async list() {
@@ -179,18 +202,22 @@ export class Songs {
     return out;
   }
 
-  // a .sid file into the store; lens: song lengths in deciseconds (from Songlengths.md5)
+  // a .sid file into the store; lens: song lengths in deciseconds (from Songlengths.md5). Compressed
+  // when the firmware takes that
   async put(bytes, lens = [], onProgress = null) {
     const info = sidInfo(bytes);
     if (!info) throw fail("not a PSID / RSID file");
     if (info.sids > 1) throw fail(`a ${info.sids}SID tune: SiDJ plays one-SID tunes`);
     if (bytes.length > FILE_MAX) throw fail(`too big (${bytes.length} bytes; the player takes ${FILE_MAX})`);
     lens = lens.slice(0, MAX_LENS);
-    const hdr = [...le(bytes.length, 4), lens.length, ...md5(bytes)];
+    if (this.version === undefined) this.version = (await this.info()).version;
+    const packed = this.version >= 2 ? await packSong(bytes) : null, data = packed || bytes;
+    const hdr = [...le(data.length, 4), lens.length, ...md5(bytes)];
     for (const x of lens) hdr.push(x & 0xFF, x >> 8);
+    if (packed) hdr.push(...le(bytes.length, 2));
     if ((await this.ask(PUT_BEGIN, hdr))[0]) throw fail("the FM-1 refused the file");
-    for (let off = 0; off < bytes.length; off += CHUNK) {
-      const chunk = Array.from(bytes.subarray(off, off + CHUNK));
+    for (let off = 0; off < data.length; off += CHUNK) {
+      const chunk = Array.from(data.subarray(off, off + CHUNK));
       let ok = false;
       for (let a = 0; a < 3 && !ok; a++) {
         const r = await this.ask(PUT_DATA, [...le(off, 3), ...chunk], 4000);
@@ -198,15 +225,18 @@ export class Songs {
         else if (r[0] === 1 && (await this.ask(PUT_BEGIN, hdr))[0]) throw fail("the FM-1 refused the file");
       }
       if (!ok) throw fail(`the FM-1 did not take the bytes at ${off}`);
-      if (onProgress) onProgress(Math.min(bytes.length, off + CHUNK) / bytes.length);
+      if (onProgress) onProgress(Math.min(data.length, off + CHUNK) / data.length);
     }
-    const status = (await this.ask(PUT_END, le(crc16(bytes), 2), 30000))[0];
+    const status = (await this.ask(PUT_END, le(crc16(data), 2), 30000))[0];
     if (status) throw fail(`the FM-1 did not keep the file: ${PUT_ERRORS[status] || status}`);
     this.sent.set(songKey({ ...info, size: bytes.length }), bytes);
   }
 
-  async get(k, size, onProgress = null) {
-    const out = new Uint8Array(size);
+  // the song's file, as it was added
+  async get(k, _size = 0, onProgress = null) {
+    const e = await this.entry(k);
+    if (!e) throw fail(`no song ${k + 1}`);
+    const size = e.stored, out = new Uint8Array(size);
     for (let got = 0; got < size;) {
       const want = Math.min(CHUNK, size - got);
       const r = await this.ask(GET, [k & 0xFF, k >> 8, ...le(got, 3), ...le(want, 2)]);
@@ -215,7 +245,7 @@ export class Songs {
       got += r.length - 3;
       if (onProgress) onProgress(got / size);
     }
-    return out;
+    return e.raw ? unpackSong(out) : out;
   }
 
   async delete(k) { if ((await this.ask(DELETE, [k & 0xFF, k >> 8]))[0]) throw fail("delete failed"); }

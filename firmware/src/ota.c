@@ -6,8 +6,8 @@
  *   cmd 0x11  handshake -> we answer our package identity (FELUCCA_ID)
  *   F0 22 24 35 7F F7  upgrade -> ota_session(): pull parts of the package
  *     with cmd 0x30 read requests, check them, stage the package's update
- *     loader at 0xE0000 (outside Felucca's store), ask 0xE0000000 ("success"),
- *     then write the UPDATA_PARM record (flash 0xE4F00 + RAM 0x01C7FD88) and
+ *     loader at 0xF7000 (above the song pool), ask 0xE0000000 ("success"),
+ *     then write the UPDATA_PARM record (flash 0xFBF00 + RAM 0x01C7FD88) and
  *     reset. The SPL runs the loader, which installs the package.
  * Nothing is committed before the host's "success"; a failure after the
  * staging began erases the staging area, and Felucca carries on. A package
@@ -27,12 +27,13 @@
  *   ota_show(step, code)       progress / result for the screen
  *   ota_commit(parm)           write RAM record + reset (never returns on hardware)
  */
-#define OTA_AREA 0x000E0000u                     /* staged loader, 5 x 4 KiB */
+#define OTA_AREA 0x000F7000u                     /* staged loader, 5 x 4 KiB: above the song pool */
+#define OTA_OLD_AREA 0x000E0000u                 /* where older firmwares stage it (now in the song pool) */
 #define OTA_AREA_LEN 0x5000u
-#define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xE4F00 = 4K boundary - 256: SPL scan */
+#define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xFBF00 = 4K boundary - 256: SPL scan */
 #define OTA_FL_LEN 0x93000u                      /* flash.bin = [0, the PRCT end): the head and this board's app area,
                                                   * the size the update loader writes (ldr_core.c LDR_APP_HI) */
-#define OTA_FL_OFFICIAL_MAX OTA_AREA             /* the official loader's flash.bin: up to the staging area */
+#define OTA_FL_OFFICIAL_MAX 0xE0000u              /* the official loader's flash.bin: V16's is 0xA9000 */
 #define OTA_HEAD_V15 0x3FEEu                     /* CRC of the official packages' head, flash [0, 0x4000) */
 #define OTA_HEAD_V16 0x22B0u
 #define OTA_LDR_HCRC 0xEBAAu                     /* official update loader (usb_hid_ota.bin; V15 and V16) */
@@ -46,6 +47,7 @@ static void ota_frame_done(void);
 static uint32_t ota_now_ms(void);
 static void ota_idle(void);
 static int ota_erase(uint32_t off);
+static int ota_erase_any(uint32_t off);          /* outside the area too: only for the old staging */
 static int ota_prog(uint32_t off, const void *p, uint32_t n);
 static int ota_fread(uint32_t off, void *p, uint32_t n);
 static void ota_show(uint32_t step, int32_t code);
@@ -414,5 +416,16 @@ static int ota_boot_cleanup(void)
         used |= r[i] != 0xFFu;
     if (used)
         ota_unstage();
+    /* a loader staged by the firmware before this one, at the old place: not a song's bytes (the JLFS
+     * head and its CRC), so it goes before the song pool walks over it */
+    {
+        uint8_t h[32];
+        if (!ota_fread(OTA_OLD_AREA, h, 32) && ota_memeq(h + 16, (const uint8_t *)"LOADER.BIN", 11) &&
+            ota_rd16(h) == ota_crc16(h + 2, 30, 0)) {
+            for (i = 0; i < OTA_AREA_LEN; i += 0x1000u)
+                ota_erase_any(OTA_OLD_AREA + i);
+            used = 1;
+        }
+    }
     return (int)used;
 }

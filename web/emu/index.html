@@ -717,9 +717,9 @@ function onMidi(bytes) {                                  // whole SysEx message
 // ---------------------------------------------------------------- switching on
 const status = document.getElementById("status"), cpu = document.getElementById("cpu");
 // ---------------------------------------------------------------- a song from another page
-// Opened as emu/#import by another page (SID Factory II Pocket's: a song made on the FM-1, as a
-// .sid), this page says it is ready to the one that opened it, takes one .sid from it, adds it to
-// the songs (once: the same file again is the one already there) and plays it when switched on.
+// Opened as emu/#import by another page (a song from another tool, as a .sid), this page says it
+// is ready to the one that opened it, takes one .sid from it, adds it to the songs (once: the
+// same file again is the one already there) and plays it when switched on.
 let importSong = null;
 function playImport() {                                   // SiDJ's PLAY command (fm1_sid.py play N): the player, at the song
   const k = songs.indexOf(importSong);

@@ -39,7 +39,7 @@
  *                                fmodeval, res; the MIDI clock: clk_pulses, clk_starts, clk_stops, clk_conts,
  *                                clk_on, clk_first_ms, clk_bpm (x10), clk_tried, clk_ratio, clk_offset, clk_click,
  *                                clk_kept, kept, clk_manual, dpulses (since mark); the clock coming in: follow,
- *                                follow_bpm (x10), follow_err (0.1 ms); the output:
+ *                                follow_bpm (x10), follow_err (0.1 ms), follow_speed (Q12); the output:
  *                                output, asid_msgs, asid_starts, asid_stops, asid_types, asid_bad,
  *                                asid_double, asid_vol_at_stop, asid_diffC, asid_seenC (chip C)
  *                                (VALUE may be <N or >N); exit 1 on a mismatch
@@ -166,7 +166,7 @@ void plat_keepalive(void) {}
 static uint32_t wav_frames, host_frames;
 /* the MIDI clock coming in (`clockin BPM`): pulses timed in ticks, numbered as usb.c does */
 static uint32_t ci_t[32], ci_k[32], ci_w, ci_r, ci_n;
-static uint8_t ci_stopped;
+static uint8_t ci_stopped = 1;                    /* (as usb.c: counted from a Start or Continue) */
 static double clkin_bpm, clkin_next_ms, clkin_jitter;
 static void clock_in(uint32_t b, uint32_t t)
 {
@@ -181,6 +181,7 @@ static void clock_in(uint32_t b, uint32_t t)
 }
 int plat_clock_in(uint32_t *t, uint32_t *k) { if (ci_r == ci_w) return 0; *t = ci_t[ci_r % 32u]; *k = ci_k[ci_r % 32u]; ci_r++; return 1; }
 uint32_t plat_ticks(void) { return now_ms * (PLAT_TICKS_HZ / 1000u); }
+uint32_t plat_out_ticks(void) { return 128u * (PLAT_TICKS_HZ / 44100u); }   /* (half a 256-frame block) */
 uint32_t plat_frame_ticks(uint32_t frame) { return (uint32_t)((uint64_t)(host_frames + frame) * PLAT_TICKS_HZ / 44100u); }
 static uint32_t rt_beats[4096], rt_nbeats, rt_pulse;      /* `clicks FILE`: each beat's frame in the recording */
 void plat_midi_rt(uint8_t b, uint32_t frame)              /* (sent at once here; the beats noted where they play) */
@@ -198,7 +199,7 @@ static int asid_diff(int chip)             /* registers of the ASID image that d
 }
 
 static uint8_t store[OBJ_NOBJ][PLAT_STORE_MAX];
-static int store_len[OBJ_NOBJ] = {-1, -1, -1, -1, -1, -1, -1};
+static int store_len[OBJ_NOBJ] = {-1, -1, -1, -1, -1};
 static uint32_t store_writes;               /* saves so far (the browser keeps the objects) */
 int plat_store_load(uint32_t obj, void *dst, uint32_t max)
 {
@@ -227,13 +228,13 @@ void plat_cpu_stats(uint32_t *mean_x10, uint32_t *peak_x10) { *mean_x10 = *peak_
 void plat_supplies(uint8_t s[3]) { s[0] = s[1] = s[2] = 0; }
 void plat_stop_for_flash(void) { eng_post(EV_STOP, 0, 0, 0); }   /* (no flash here: nothing to wait for) */
 
-/* the song pool: 240 KB of simulated flash */
+/* the song pool: 384 KB of simulated flash */
 #include "../firmware/src/app/settings.c"
-static uint8_t pool[0x3C000];
-static const uint8_t *song_ptr(uint32_t off) { return pool + (off - 0xA0000u); }
-static int song_blank(uint32_t off, uint32_t n) { uint32_t i; for (i = 0; i < n; i++) if (pool[off - 0xA0000u + i] != 0xff) return 0; return 1; }
-static int song_erase_sector(uint32_t off) { memset(pool + (off - 0xA0000u), 0xff, 4096); return 0; }
-static int song_prog(uint32_t off, const uint8_t *src, uint32_t n) { uint32_t i; for (i = 0; i < n; i++) pool[off - 0xA0000u + i] &= src[i]; return memcmp(pool + (off - 0xA0000u), src, n) ? -1 : 0; }
+static uint8_t pool[0x60000];
+static const uint8_t *song_ptr(uint32_t off) { return pool + (off - 0x93000u); }
+static int song_blank(uint32_t off, uint32_t n) { uint32_t i; for (i = 0; i < n; i++) if (pool[off - 0x93000u + i] != 0xff) return 0; return 1; }
+static int song_erase_sector(uint32_t off) { memset(pool + (off - 0x93000u), 0xff, 4096); return 0; }
+static int song_prog(uint32_t off, const uint8_t *src, uint32_t n) { uint32_t i; for (i = 0; i < n; i++) pool[off - 0x93000u + i] &= src[i]; return memcmp(pool + (off - 0x93000u), src, n) ? -1 : 0; }
 /* the song transfer (songs.c, as tools/fm1_sid.py and the web page speak it): one SysEx frame
  * in at a time (the bytes between F0 and F7), the answers out as whole messages */
 static uint8_t sxi_buf[1024], sxo_buf[8192];
@@ -435,6 +436,7 @@ static int expect(const char *what, const char *val)
     else if (!strcmp(what, "follow")) have = eng_follow;                /* following the clock coming in */
     else if (!strcmp(what, "follow_bpm")) have = eng_follow_bpm_x10;    /* its BPM x 10 */
     else if (!strcmp(what, "follow_err")) have = labs((long)eng_follow_err_us) / 100;   /* |the tune's pulse - the clock's|, 0.1 ms */
+    else if (!strcmp(what, "follow_speed")) have = (long)eng_follow_speed;        /* the tune's speed while following, Q12 (4096: as written) */
     else if (!strcmp(what, "clk_first_tune_ms")) have = (long)((uint64_t)eng_clk_first_cyc * 1000u / c64.clock_hz);   /* beat 1 in the tune */
     else if (!strcmp(what, "dpulses")) have = (long)(clk_pulses - mark_pulses);   /* clock pulses since `mark` */
     else if (!strncmp(what, "songsize", 8)) { uint32_t sz = 0; song_file(atoi(what + 8), &sz, 0, 0); have = (long)sz; }
@@ -589,6 +591,28 @@ int main(int argc, char **argv)
             rc = song_put(raw, n, 0, 0, 0);
             if (rc) { printf("line %d: song_put %u bytes: %d\n", lineno, (unsigned)n, rc); return 2; }
             songs_changed();
+        } else if (!strcmp(cmd, "sidz")) {               /* sidz STORED RAWSIZE [LEN_DS ...]: stored bytes (SONG_Z_HEAD plain, then deflate) */
+            static uint8_t buf[ENG_FILE_MAX];
+            uint16_t lens[SONG_MAX_LEN];
+            int nlen = 0, rc;
+            char *rest = strstr(line, a);
+            size_t got;
+            FILE *f = fopen(a, "rb");
+            if (!f) { printf("line %d: cannot open %s\n", lineno, a); return 2; }
+            got = fread(buf, 1, sizeof buf, f);
+            fclose(f);
+            rest = rest ? rest + strlen(a) : line + strlen(line);
+            strtoul(rest, &rest, 10);                    /* (RAWSIZE) */
+            while (*rest && nlen < SONG_MAX_LEN) { char *end; long v = strtol(rest, &end, 10); if (end == rest) break; lens[nlen++] = (uint16_t)v; rest = end; }
+            rc = song_put_ex(buf, (uint32_t)got, 0, lens, nlen, (uint32_t)strtoul(b, 0, 0));
+            if (rc) { printf("line %d: song_put %s: %d\n", lineno, a, rc); return 2; }
+            songs_changed();
+        } else if (!strcmp(cmd, "poolwipe")) {
+            song_wipe();
+            songs_changed();
+        } else if (!strcmp(cmd, "poolold")) {            /* the pool as SiDJ 1.3 left it: its entries at 0xA0000 */
+            memmove(pool + 0xD000u, pool, 0x3C000u);
+            memset(pool, 0xff, 0xD000u);
         } else if (!strcmp(cmd, "poolwrite")) {
             uint32_t off = (uint32_t)strtoul(a, 0, 0), n = (uint32_t)strtoul(b, 0, 0);
             if (off + n > sizeof pool) { printf("line %d: poolwrite past the pool\n", lineno); return 2; }

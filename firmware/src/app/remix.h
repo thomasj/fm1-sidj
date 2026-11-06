@@ -77,6 +77,7 @@ typedef struct { uint8_t reg, val; } rx_out_t;
 
 void remix_init(remix_t *rx);               /* images cleared, no overrides, the scale at x1 */
 void remix_reset(remix_t *rx);              /* overrides and offsets off; the images and the cutoff mode stay */
+void remix_restart(remix_t *rx);            /* the tune from its start: images cleared, the overrides stay */
 /* a tune write: 0 .. 3 output writes in o[]; returns the count */
 int remix_write(remix_t *rx, uint8_t reg, uint8_t val, rx_out_t *o);
 /* after an override changed: re-derive voice v's registers (-1: all voices and the filter);

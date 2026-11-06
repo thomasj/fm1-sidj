@@ -48,14 +48,15 @@ check(sidInfo(bytes1) && sidInfo(bytes1).name.length > 0 && sidInfo(new Uint8Arr
 
 const songs = new Songs(transport);
 let info = await songs.info();
-check(info.count === 0 && info.size === 0x3C000 && info.used === 0, `info: an empty store of ${info.size} bytes`);
+check(info.count === 0 && info.size === 0x60000 && info.used === 0, `info: an empty store of ${info.size} bytes`);
 let progress = 0;
 await songs.put(bytes1, [600, 1234], (p) => { progress = p; });
 check(progress === 1, "put: progress to 100 %");
 await songs.put(bytes2, []);
 info = await songs.info();
-check(info.count === 2 && info.used > bytes1.length + bytes2.length, `two songs in, ${info.used} bytes used`);
+check(info.count === 2 && info.used < bytes1.length + bytes2.length, `two songs in, compressed: ${info.used} bytes used`);
 const list = await songs.list();
+check(list[0].size === bytes1.length && list[0].stored < list[0].size && list[0].raw === bytes1.length, `entry 1: ${list[0].size} bytes, ${list[0].stored} stored`);
 check(list[0].name === sidInfo(bytes1).name && list[0].author === sidInfo(bytes1).author, `entry 1: ${list[0].name} / ${list[0].author}`);
 check(list[0].lens.join() === "600,1234" && list[1].lens.length === 0, "the song lengths came along");
 const back = await songs.get(0, list[0].size);

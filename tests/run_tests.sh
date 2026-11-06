@@ -47,9 +47,15 @@ SID2="$HVSC/MUSICIANS/G/Galway_Martin/Wizball.sid"
 SID3="$HVSC/MUSICIANS/J/JVD/Double_2SID.sid"
 SID4="$HVSC/MUSICIANS/G/Galway_Martin/Arkanoid.sid"   # an RSID
 if [ ! -f "$SID1" ]; then SID1=build/host/synth.sid; SID2=build/host/synth.sid; SID3=build/host/synth.sid; SID4=build/host/synth.sid; echo "  (no HVSC: playing the test tune)"; fi
+# a song as the computer sends it compressed: the head plain, the rest raw deflate (store_space.in)
+python3 -c "
+import sys, zlib
+d = open(sys.argv[1], 'rb').read(); c = zlib.compressobj(9, zlib.DEFLATED, -15)
+open('build/host/song1.z', 'wb').write(d[:0x7E] + c.compress(d[0x7E:]) + c.flush())" "$SID1"
+SID1SIZE=$(wc -c < "$SID1" | tr -d ' ')
 for s in tests/scenarios/*.in; do
     out="build/scenarios/$(basename "$s" .in).sidj"
-    sed -e "s#@SID1@#$SID1#g" -e "s#@SID2@#$SID2#g" -e "s#@SID3@#$SID3#g" -e "s#@SID4@#$SID4#g" "$s" > "$out"
+    sed -e "s#@SID1@#$SID1#g" -e "s#@SID2@#$SID2#g" -e "s#@SID3@#$SID3#g" -e "s#@SID4@#$SID4#g" -e "s#@SID1SIZE@#$SID1SIZE#g" "$s" > "$out"
     echo "-- $s"
     build/host/sidj_host "$out" build/scenarios
 done
@@ -111,5 +117,6 @@ if [ -f build/sidj.fwsc ]; then
 else
     echo "  skip update-path tests (no build/sidj.fwsc: run ./build.sh)"
 fi
+python3 tests/inflate_test.py                 # the song unpacker against zlib
 "$PY" tests/rescue_test.py                   # the rescue tool; $FM1_STOCK: M-VAVE's V15 and V16 too
 echo "all tests passed"

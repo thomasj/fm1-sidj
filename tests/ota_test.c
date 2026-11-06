@@ -94,9 +94,10 @@ static int ota_frame_get(const uint8_t **p, uint32_t *n)
 static void ota_frame_done(void) { rx_full = 0; }
 static uint32_t ota_now_ms(void) { return now_ms; }
 static void ota_idle(void) { now_ms += 1; }
+static int ota_erase_any(uint32_t off) { if (off < 0xE0000u || off >= 0xE5000u || (off & 0xFFFu)) { bad_erase++; return -8; } memset(nor + off, 0xFF, 4096); return 0; }
 static int ota_erase(uint32_t off)
 {
-    if (off < 0xE0000u || off >= 0xE5000u || (off & 0xFFFu)) { bad_erase++; return -8; }
+    if (off < 0xF7000u || off >= 0xFC000u || (off & 0xFFFu)) { bad_erase++; return -8; }
     erases++;
     memset(nor + off, 0xFF, 4096);
     return 0;
@@ -105,7 +106,7 @@ static int ota_prog(uint32_t off, const void *src, uint32_t n)
 {
     const uint8_t *s = src;
     uint32_t i;
-    if (off < 0xE0000u || off + n > 0xE5000u) { bad_erase++; return -8; }
+    if (off < 0xF7000u || off + n > 0xFC000u) { bad_erase++; return -8; }
     for (i = 0; i < n; i++) nor[off + i] &= s[i];
     return 0;
 }
@@ -145,7 +146,7 @@ static int check(const char *what, int ok)
 static int area_erased(void)
 {
     uint32_t i;
-    for (i = 0xE0000; i < 0xE5000; i++) if (nor[i] != 0xFF) return 0;
+    for (i = 0xF7000; i < 0xFC000; i++) if (nor[i] != 0xFF) return 0;
     return 1;
 }
 
@@ -218,19 +219,28 @@ int main(int argc, char **argv)
     else
         bad += check("headers + loader + confirm, no head reads", requests >= 10 && requests <= 30);
     {
-        uint8_t *h = nor + 0xE0000, *p = committed_parm;
-        bad += check("staged body == the package's loader", !memcmp(nor + 0xE0020, logical + ota_body_off(), 64));
+        uint8_t *h = nor + 0xF7000, *p = committed_parm;
+        bad += check("staged body == the package's loader", !memcmp(nor + 0xF7020, logical + ota_body_off(), 64));
         bad += check("LOADER.BIN head CRC",
                      (h[0] | h[1] << 8) == ota_crc16(h + 2, 30, 0) && !memcmp(h + 16, "LOADER.BIN", 10));
-        bad += check("record at 0xE4F00 == RAM record", !memcmp(nor + 0xE4F00, p, 112));
+        bad += check("record at 0xFBF00 == RAM record", !memcmp(nor + 0xFBF00, p, 112));
         bad += check("record CRC / type / magic / ota_addr",
                      (p[0] | p[1] << 8) == ota_crc16(p + 2, 78, 0) && (p[2] | p[3] << 8) == 0x5A0D &&
-                     (p[6] | p[7] << 8) == 0x5441 && ota_rd32(p + 72) == 0xE0000);
-        bad += check("nothing written outside 0xE0000..0xE4FFF", bad_erase == 0);
+                     (p[6] | p[7] << 8) == 0x5441 && ota_rd32(p + 72) == 0xF7000);
+        bad += check("nothing written outside 0xF7000..0xFBFFF", bad_erase == 0);
     }
     /* boot cleanup erases it */
     bad += check("boot cleanup erases the area", ota_boot_cleanup() == 1 && area_erased());
     bad += check("second boot: nothing to do", ota_boot_cleanup() == 0);
+    {   /* a loader the firmware before this one staged at 0xE0000 goes at boot; song data there stays */
+        uint8_t h[32];
+        memset(h, 0, 32); memcpy(h + 16, "LOADER.BIN", 11); ota_wr16(h, ota_crc16(h + 2, 30, 0));
+        memcpy(nor + 0xE0000, h, 32); nor[0xE1000] = 0x12; nor[0xE4F06] = 0x41;
+        bad += check("boot cleanup erases a loader staged at the old place", ota_boot_cleanup() == 1 && nor[0xE0000] == 0xFF && nor[0xE1000] == 0xFF && nor[0xE4F06] == 0xFF);
+        memset(nor + 0xE0000, 0x5A, 0x5000);
+        bad += check("song data at the old place stays", ota_boot_cleanup() == 0 && nor[0xE0000] == 0x5A && nor[0xE4FFF] == 0x5A);
+        memset(nor + 0xE0000, 0xFF, 0x5000);
+    }
 
     /* another board's package (flash.bin not this board's app area size): refused before anything is erased.
      * The official loader writes the whole flash.bin, so it may be larger (V16: 0xA9000), up to the staging area */

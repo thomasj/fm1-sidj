@@ -16,6 +16,7 @@
                                                          lfo_target 1 1 targets voice 2's LFO one step on; reset)
   --port PATTERN picks the MIDI port (default: the first whose name contains FM-1)
   --hvsc DIR     the HVSC root (default ~/Music/C64Music): Songlengths.md5 gives each file its song lengths
+Songs are sent compressed when the firmware takes that; `get` and `compact` give the file back as it was.
 
 Protocol (firmware/src/app/songs.c): F0 7D 'S' cmd payload F7, the payload packed 7 data bytes
 -> 8 MIDI bytes (a byte of the seven high bits first). Needs mido and python-rtmidi.
@@ -27,6 +28,7 @@ import re
 import struct
 import sys
 import time
+import zlib
 from pathlib import Path
 
 import mido
@@ -131,10 +133,25 @@ def hvsc_str(b):
     return b.split(b"\0")[0].decode("latin-1")
 
 
+Z_HEAD = 0x7E              # a compressed song's plain start: the PSID header and the load address
+
+
+def pack_song(data):
+    """The bytes to store: the head as it is, the rest raw deflate; None if that saves nothing."""
+    c = zlib.compressobj(9, zlib.DEFLATED, -15)
+    z = data[:Z_HEAD] + c.compress(data[Z_HEAD:]) + c.flush()
+    return z if len(z) < len(data) else None
+
+
+def unpack_song(stored):
+    return stored[:Z_HEAD] + zlib.decompress(stored[Z_HEAD:], -15)
+
+
 def do_info(dev):
     r = dev.ask(INFO)
     size, used = struct.unpack("<II", r[:8])
     n = r[8] | r[9] << 8
+    dev.version = r[14] if len(r) > 14 else 1
     return size, used, n
 
 
@@ -145,11 +162,12 @@ def entries(dev):
         r = dev.ask(ENTRY, bytes([k & 0xFF, k >> 8]))
         if r[0]:
             continue
-        size = struct.unpack("<I", r[1:5])[0]
+        stored = struct.unpack("<I", r[1:5])[0]
         nlen = r[5]
         lens = [r[6 + 2 * i] | r[7 + 2 * i] << 8 for i in range(nlen)]
         s = r[6 + 2 * nlen:]
-        out.append((k, size, lens, hvsc_str(s[0:32]), hvsc_str(s[32:64]), hvsc_str(s[64:96])))
+        raw = s[96] | s[97] << 8 if len(s) >= 98 else 0
+        out.append((k, raw or stored, lens, hvsc_str(s[0:32]), hvsc_str(s[32:64]), hvsc_str(s[64:96]), stored))
     return out
 
 
@@ -160,9 +178,46 @@ def fmt_len(ds):
 def do_list(dev):
     size, used, n = do_info(dev)
     print(f"  {n} songs, {used * 100 // size}% of {size // 1024} KB used")
-    for k, sz, lens, name, author, released in entries(dev):
+    for k, sz, lens, name, author, released, stored in entries(dev):
         ln = " ".join(fmt_len(x) for x in lens) if lens else "?"
-        print(f"  {k + 1:3d}. {name:32s} {author:24s} {sz:6d} B  {ln}")
+        print(f"  {k + 1:3d}. {name:32s} {author:24s} {sz:6d} B  {ln}" + (f"  ({stored} B stored)" if stored != sz else ""))
+
+
+def send_song(dev, data, lens, md5, name="", quiet=True):
+    """A file into the store, compressed if the firmware takes that."""
+    if getattr(dev, "version", None) is None:
+        do_info(dev)
+    packed = pack_song(data) if dev.version >= 2 else None
+    stored = packed or data
+    hdr = struct.pack("<IB", len(stored), len(lens)) + bytes.fromhex(md5) + b"".join(struct.pack("<H", x) for x in lens)
+    if packed:
+        hdr += struct.pack("<H", len(data))
+    if dev.ask(PUT_BEGIN, hdr)[0]:
+        raise SystemExit(f"{name}: the FM-1 refused the file ({len(data)} bytes; the limit is 61440)")
+    for off in range(0, len(stored), 256):
+        chunk = stored[off:off + 256]
+        for attempt in range(3):
+            r = dev.ask(PUT_DATA, off.to_bytes(3, "little") + chunk, timeout=4.0)
+            if r[0] == 0 and int.from_bytes(r[1:4], "little") == off:
+                break
+            if r[0] == 1:
+                sys.stderr.write("\n  the FM-1 has no transfer open: starting it again\n")
+                if dev.ask(PUT_BEGIN, hdr)[0]:
+                    raise SystemExit("the FM-1 refused the file")
+        else:
+            raise SystemExit(f"chunk at {off} not accepted")
+        if not quiet:
+            sys.stdout.write(f"\r  {name}: {100 * (off + len(chunk)) // len(stored):3d}%")
+            sys.stdout.flush()
+    crc = crc16(stored).to_bytes(2, "little")
+    status = dev.ask(PUT_END, crc, timeout=30.0)[0]
+    if not quiet:
+        print()
+    if status:
+        raise SystemExit("the FM-1 did not keep the file: " + {1: "no transfer", 2: "bytes missing", 3: "CRC mismatch", 4: "too big",
+                                                             5: "the pool is full (try `compact`)", 6: "flash write failed",
+                                                             7: "a 2SID / 3SID tune (SiDJ plays one-SID tunes)"}.get(status, str(status)))
+    return len(stored)
 
 
 def put_one(dev, path, songlengths, quiet=False):
@@ -175,32 +230,8 @@ def put_one(dev, path, songlengths, quiet=False):
         return False
     md5, lens = songlengths.lookup(data)
     lens = lens[:MAX_LEN]
-    hdr = struct.pack("<IB", len(data), len(lens)) + bytes.fromhex(md5) + b"".join(struct.pack("<H", x) for x in lens)
-    if dev.ask(PUT_BEGIN, hdr)[0]:
-        raise SystemExit(f"{path}: the FM-1 refused the file ({len(data)} bytes; the limit is 61440)")
-    for off in range(0, len(data), 256):
-        chunk = data[off:off + 256]
-        for attempt in range(3):
-            r = dev.ask(PUT_DATA, off.to_bytes(3, "little") + chunk, timeout=4.0)
-            if r[0] == 0 and int.from_bytes(r[1:4], "little") == off:
-                break
-            if r[0] == 1:
-                sys.stderr.write("\n  the FM-1 has no transfer open: starting it again\n")
-                if dev.ask(PUT_BEGIN, hdr)[0]:
-                    raise SystemExit("the FM-1 refused the file")
-        else:
-            raise SystemExit(f"chunk at {off} not accepted")
-        if not quiet:
-            sys.stdout.write(f"\r  {Path(path).name}: {100 * (off + len(chunk)) // len(data):3d}%")
-            sys.stdout.flush()
-    status = dev.ask(PUT_END, crc16(data).to_bytes(2, "little"), timeout=30.0)[0]
-    if not quiet:
-        print()
-    if status:
-        raise SystemExit("the FM-1 did not keep the file: " + {1: "no transfer", 2: "bytes missing", 3: "CRC mismatch", 4: "too big",
-                                                             5: "the pool is full (try `compact`)", 6: "flash write failed",
-                                                             7: "a 2SID / 3SID tune (SiDJ plays one-SID tunes)"}.get(status, str(status)))
-    print(f"  {Path(path).name}: {len(data)} bytes, {len(lens)} song length(s){'' if lens else ' (not in Songlengths.md5)'}")
+    stored = send_song(dev, data, lens, md5, Path(path).name, quiet)
+    print(f"  {Path(path).name}: {len(data)} bytes, {stored} stored, {len(lens)} song length(s){'' if lens else ' (not in Songlengths.md5)'}")
     return True
 
 
@@ -216,11 +247,14 @@ def do_put(dev, paths, songlengths):
         put_one(dev, f, songlengths)
 
 
-def do_get(dev, k, path):
+def fetch_song(dev, k):
+    """The song's file, as it was added."""
     r = dev.ask(ENTRY, bytes([k & 0xFF, k >> 8]))
     if r[0]:
         raise SystemExit(f"no song {k + 1}")
     size = struct.unpack("<I", r[1:5])[0]
+    s = r[6 + 2 * r[5]:]
+    raw = s[96] | s[97] << 8 if len(s) >= 98 else 0
     data = bytearray()
     while len(data) < size:
         want = min(256, size - len(data))
@@ -228,32 +262,25 @@ def do_get(dev, k, path):
         if len(r) < 3 or int.from_bytes(r[0:3], "little") != len(data):
             raise SystemExit("bad answer while reading")
         data += r[3:]
-    Path(path).write_bytes(bytes(data))
-    print(f"  song {k + 1} -> {path} ({size} bytes)")
+    return unpack_song(bytes(data)) if raw else bytes(data)
+
+
+def do_get(dev, k, path):
+    data = fetch_song(dev, k)
+    Path(path).write_bytes(data)
+    print(f"  song {k + 1} -> {path} ({len(data)} bytes)")
 
 
 def do_compact(dev, songlengths):
     live = entries(dev)
     tmp = []
-    for k, sz, lens, name, author, released in live:
-        r = bytearray()
-        while len(r) < sz:
-            want = min(256, sz - len(r))
-            x = dev.ask(GET, bytes([k & 0xFF, k >> 8]) + len(r).to_bytes(3, "little") + want.to_bytes(2, "little"))
-            r += x[3:]
-        tmp.append((bytes(r), lens))
+    for k, sz, lens, name, author, released, stored in live:
+        tmp.append((fetch_song(dev, k), lens))
     print(f"  {len(tmp)} songs fetched; wiping the pool")
     if dev.ask(WIPE, b"WIPE", timeout=60.0)[0]:
         raise SystemExit("wipe failed")
     for data, lens in tmp:
-        md5 = hashlib.md5(data).hexdigest()
-        hdr = struct.pack("<IB", len(data), len(lens)) + bytes.fromhex(md5) + b"".join(struct.pack("<H", x) for x in lens)
-        if dev.ask(PUT_BEGIN, hdr)[0]:
-            raise SystemExit("refused while sending back")
-        for off in range(0, len(data), 256):
-            dev.ask(PUT_DATA, off.to_bytes(3, "little") + data[off:off + 256], timeout=4.0)
-        if dev.ask(PUT_END, crc16(data).to_bytes(2, "little"), timeout=30.0)[0]:
-            raise SystemExit("a song was not kept while sending back")
+        send_song(dev, data, lens, hashlib.md5(data).hexdigest())
     print("  done")
 
 
@@ -331,6 +358,9 @@ def main():
                 print(f"        supplies VDC14 {1.25 + 0.05 * r[55]:.2f} V (level {r[55]})  SYSVDD {0.93 + 0.03 * r[56]:.2f} V (level {r[56]})")
             if len(r) >= 58:                                # the system clock, after M-VAVE's boot loader
                 print(f"        clock   360 MHz{' (raised from 320: V16 boot loader)' if r[57] else ''}")
+            if len(r) >= 65 and r[58]:
+                err = struct.unpack("<i", bytes(r[59:63]))[0] / 1000
+                print(f"        following a clock: {err:+.1f} ms off it, speed {(r[63] | r[64] << 8) / 40.96:.1f} %")
     elif a.cmd == "wipe":
         if dev.ask(WIPE, b"WIPE", timeout=60.0)[0]:
             raise SystemExit("wipe failed")

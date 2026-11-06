@@ -22,7 +22,7 @@ as a whole under the terms above.
 | `firmware/src/app/{panel,plat_fm1,main_fm1}.c`, `firmware/src/app/plat.h`, `firmware/src/sidj.c`, `host/sidj_host.c` | after X0X's `panel.c`, `plat_fm1.c`, `main_fm1.c`, `plat.h`, `x0x.c` and `host/x0x_host.c`, after Felucca's `main.c` / `audio.c` / `panel.c` | GPL-3.0-only |
 | `tools/build.py`, `build.sh`, `tools/fm1pkg_make.py`, `tools/lz4blk.py`, `tools/get_toolchain.sh`, `tools/fm1_install.py`, `tools/fm1_rescue.*`, `tools/fm1_debug.py`, `tools/gen_font.py`, `tests/{ota_test,ldr_test,storage_test,enc_test}.c`, `tests/install_test.py`, `tests/target_budget.py` | Felucca, by way of X0X; `build.py` adapted | GPL-3.0-only |
 | `firmware/src/c64/cpu6502.c` and its header | SiDJ: the documented and undocumented opcodes with cycle counts, IRQ / NMI and the bus hooks | GPL-3.0-only |
-| `firmware/src/c64/{c64,sidfile}.c` and headers, `firmware/src/app/{engine,remix,ui,songs,settings,asid,beat,clkstore}.c` and headers, `host/sidplay.c`, `tools/fm1_sid.py`, `tests/{sidfile,c64,remix,asid,beat,stems,cpu}_test.c`, `tests/rescue_test.py`, `tests/scenarios/`, `docs/` | SiDJ | GPL-3.0-only |
+| `firmware/src/c64/{c64,sidfile}.c` and headers, `firmware/src/app/{engine,remix,ui,songs,settings,asid,beat,clkstore,inflate}.c` and headers, `host/sidplay.c`, `tools/fm1_sid.py`, `tests/{sidfile,c64,remix,asid,beat,stems,cpu}_test.c`, `tests/{rescue_test,inflate_test}.py`, `tests/scenarios/`, `docs/` | SiDJ | GPL-3.0-only |
 | `web/emu/` (`sidj_web.c`, `worklet.js`, `index.html`, `build.sh`) | after X0X's browser emulator (`x0x_web.c`, its worklet and page) | GPL-3.0-only |
 | `web/site/fm1ota.js`, `web/site/fm1pkg.js` | Felucca's web updater, Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, unchanged | GPL-3.0-only |
 | `web/site/index.html`, `tools/make_site.py` | SiDJ, after Felucca's installer page and `make_site.py` | GPL-3.0-only |
@@ -32,18 +32,27 @@ as a whole under the terms above.
 ### Changed from Felucca and X0X
 
 - `usb.c`: USB audio's five-channel mode with the voices' channel names, its descriptors patched
-  in RAM, the audio streaming interface listed before MIDI (as in Felucca 1.5.1), and SiDJ's
-  USB names.
-- `gfx.c`: one theme, DEBUT, with the voices' colours and the remix gold.
+  in RAM, the audio streaming interface listed before MIDI (as in Felucca 1.5.1), SiDJ's USB
+  names, MIDI clock in timed as it arrives, and MIDI out sent during the audio render.
+- `midi_uart.c`: MIDI clock in from the jack.
+- `gfx.c`: SiDJ's colours (one set, no themes), the voices' colours and the remix gold, and text
+  kept to a range of columns (the Player's scrolling title).
 - `tools/gen_font.py`: Latin-1 in the text sizes, and plain digits when Pillow has no raqm.
 - `tools/fm1pkg_make.py`: SiDJ's package identity as the default.
 - `hal/fm1_encoder.h` (new): the encoder part of `fm1_input.h`, with Felucca's later detent
   fix; `hal/fm1_input.h` uses it.
-- `hal/fm1_sys.h`: the VDC14 / SYSVDD supply raise, from X0X's later commits.
+- `hal/fm1_sys.h`: the VDC14 / SYSVDD supply raise, from X0X's later commits, and PLL2 set up for
+  360 MHz after M-VAVE's V16 boot loader.
+- `hal/fm1_flash.h`: the switch to that clock, and SiDJ's flash ranges.
+- `storage.c`: SiDJ's object map, and moving its objects from the old places.
 - `ota.c`, `loader/ldr_core.c`: a package whose flash.bin is not this board's size is refused
-  (from Felucca 1.6.1).
+  (from Felucca 1.6.1). M-VAVE's V16 package is taken as well as V15's. The loader is staged at
+  0xF7000, and one left at the old place is erased at boot.
+- `loader/loader.c`: a stub for that erase.
+- `tools/fm1_rescue.*`: takes V15 and V16 and writes the one whose boot loader the FM-1 has.
+- `tests/{ota_test,ldr_test,storage_test}.c`, `tests/install_test.py`: follow these changes.
 
-Everything else from them is unchanged.
+Everything else from them is unchanged, apart from `tools/build.py`, adapted as listed above.
 
 ## The tunes that come with the site
 

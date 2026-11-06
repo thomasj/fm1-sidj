@@ -1,0 +1,19 @@
+# SID+CLK's click (GLO + PLAY) is saved with the rest, but every start begins without it
+sid @SID1@
+turn K2 3
+wait 1000
+expect output 3
+tap PLAY
+wait 3000
+press GLO
+tap PLAY
+release GLO
+expect clk_click 1
+tap SEQ
+expect mode 0
+tap SAVE
+wait 200
+reboot
+wait 500
+expect output 3
+expect clk_click 0

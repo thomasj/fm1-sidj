@@ -114,11 +114,36 @@ The full behaviour is in [midi.md](midi.md#midi-clock); the design in short:
 
 ## Songs on the device
 
-HVSC files are 2 to 20 KB. The store is a pool in Felucca's user data area (0xA0000 to
-0xDBFFF, 240 KB) with a small index: name, author, released (the header's own strings),
-songs, default song, the song lengths per subsong, and the file. The index and the files are
-read in place through the XIP window. The pool is append-only with an in-place delete flag;
-compacting fetches, wipes and re-sends. The firmware never moves data.
+HVSC files are mostly 2 to 20 KB. The store is a pool of 384 KB with a small index: name, author, released
+(the header's own strings), songs, default song, the song lengths per subsong, and the file. The
+index and the files are read in place through the XIP window. The pool is append-only with an
+in-place delete flag; compacting fetches, wipes and re-sends. The firmware never moves data.
+
+| Flash | Size | What |
+| --- | --- | --- |
+| 0x93000-0xF2FFF | 384 KB | the songs |
+| 0xF3000-0xF4FFF | 8 KB | the kept clocks |
+| 0xF5000-0xF6FFF | 8 KB | the panel calibration |
+| 0xF7000-0xFBFFF | 20 KB | the update loader's staging |
+| 0xFC000-0xFDFFF | 8 KB | the settings |
+
+Up to 1.3 the pool was 0xA0000-0xDBFFF, with the clocks at 0x97000, the calibration at 0xDC000
+and the staging at 0xE0000. A new boot copies the clocks and the calibration up and erases a loader
+left at the old place; songs stay at 0xA0000 until the pool is compacted.
+
+From 0xEA000 the flash is M-VAVE's patch area. The pool's last 36 KB, the clocks, the calibration
+and the staging are all inside it: the price of one continuous pool. SiDJ does not ask before using
+it, since installing custom firmware is at the user's own risk, and the README says saved patches
+can be lost.
+
+The staging's address is free: the update record names it, and the chip's boot code follows. It has
+to stay above 0xA9000, or installing V16 would overwrite its own update record, and a pulled cable
+could not resume.
+
+A computer compresses a song before sending it: the first 0x7E bytes stay plain, since the list
+reads the PSID header in place, and the rest is raw deflate, about 55 % of the size on HVSC tunes.
+The FM-1 unpacks it when the song loads (`app/inflate.c`), in the main loop, while the audio goes on. Nothing is
+compressed on the device; `get` and the web page's read give the file back as it was added.
 
 Song lengths come from HVSC's `Songlengths.md5`: the sender looks the file's MD5 up and sends
 the lengths with the file, so the player can show the time and stop at the end of the song;
@@ -134,7 +159,8 @@ testing stats, output, rx and usb. `tools/fm1_sid.py` and the web page
 
 Two modes, SONGS (the list in the store) and PLAYER (the tune on screen: three voices with a
 scope each, the filter, the remix's state), SEQ between them. The controls are in the README.
-Loading a song starts clean: every override off, the tempo at 100 % and the vinyl fader at 0.
+Loading another song starts clean: every override off, the tempo at 100 % and the vinyl fader
+at 0. The same song loaded again (from its start, or another subsong) keeps all of them.
 
 ## Host side
 
@@ -148,7 +174,8 @@ with the panel on a page: songs added from the page, the ASID stream to Web MIDI
 - The SID engine against reSID 0.16, sample by sample.
 - 6510: Klaus Dormann's functional test plus an interrupt test.
 - The SID file parser, the C64 (interrupts, timers, banking, the KERNAL replacement), the
-  remix, the ASID sink, the storage, the encoder, the beat finder.
+  remix, the ASID sink, the storage, the encoder, the beat finder, the song unpacker against
+  zlib, the rescue tool against a fake update mode.
 - Scenarios in the simulator (the songs, the player, the remix, ASID, the MIDI clock out and
   in), with HVSC tunes when HVSC is on the machine (the files are not committed: HVSC's own
   terms).
