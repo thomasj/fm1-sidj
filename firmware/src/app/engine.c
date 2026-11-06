@@ -424,6 +424,7 @@ int eng_post(uint8_t type, uint8_t a, uint8_t b, uint32_t pkt)
 /* ASID goes out (ASID or BOTH), unless the tune is an RSID: those drive the whole C64 at its own
  * cycles (often digis), which ASID's frames cannot carry, so they play on the emulated SID */
 static int asid_on(void) { return asid_out() && !eng_deck_off; }
+int eng_asid_streaming(void) { return asid_on() && eng_playing; }
 
 static uint8_t vol_off(uint8_t mode_vol) { return (uint8_t)(mode_vol & ~SID_MODE_VOL); }   /* the mode, silent */
 

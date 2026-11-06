@@ -6,6 +6,7 @@
   index.html, fm1pkg.js, fm1ota.js, fm1songs.js   the installer and the song manager (web/site/)
   img/                                             the device's screens (from the simulator)
   songs/                                           tubesockor's tunes, offered on both pages
+  words/                                           the screen reader's words files (web/words, fm1-reader)
   firmware/sidj-VER.fwsc, manifest.json      the package the installer writes
   firmware/LICENSE, LICENSING.md, Apache-2.0.txt   its licences (the package holds three JieLi
                                                    SDK files under Apache-2.0)
@@ -61,6 +62,7 @@ def main():
         shutil.copy2(ROOT / "web/site" / f, out / f)
     shutil.copytree(ROOT / "web/site/img", out / "img")
     shutil.copytree(ROOT / "web/site/songs", out / "songs")
+    shutil.copytree(ROOT / "web/words", out / "words")   # the screen reader's words files: every one, never changed
     name = f"sidj-{version}.fwsc"
     shutil.copy2(pkg, fw / name)
     (fw / "manifest.json").write_text(json.dumps({"version": version, "product": product, "file": name}) + "\n")

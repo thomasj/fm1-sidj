@@ -1,0 +1,12 @@
+# words the screen reader's audit (fm1-reader tools/audit.mjs --allow) should take as words
+subsong
+sawtooth
+waveform
+# names from the test songs (titles and composers come from the files: any name can be said)
+hubbard
+galway
+wizball
+arkanoid
+jurgen
+dongen
+gorissen

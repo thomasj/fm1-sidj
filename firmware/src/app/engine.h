@@ -143,6 +143,7 @@ extern volatile uint8_t eng_follow;
 extern volatile uint16_t eng_follow_bpm_x10;
 extern volatile int32_t eng_follow_err_us;
 extern volatile uint16_t eng_follow_speed;     /* the tune's speed while following, Q12 (4096: as written) */
+int eng_asid_streaming(void);                /* ASID goes out now (a song playing, output ASID or both, not an RSID) */
 /* a tempo found before (the song's saved one): set it, then EV_LOAD a playing load with SID+CLK
  * skips the look and starts the clock from it, at its ratio and offset (the load clears valid).
  * eng_clk_get: the tempo the last look found (or was given), 0 if none */

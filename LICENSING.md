@@ -24,6 +24,8 @@ as a whole under the terms above.
 | `firmware/src/c64/cpu6502.c` and its header | SiDJ: the documented and undocumented opcodes with cycle counts, IRQ / NMI and the bus hooks | GPL-3.0-only |
 | `firmware/src/c64/{c64,sidfile}.c` and headers, `firmware/src/app/{engine,remix,ui,songs,settings,asid,beat,clkstore,inflate}.c` and headers, `host/sidplay.c`, `tools/fm1_sid.py`, `tests/{sidfile,c64,remix,asid,beat,stems,cpu}_test.c`, `tests/{rescue_test,inflate_test}.py`, `tests/scenarios/`, `docs/` | SiDJ | GPL-3.0-only |
 | `web/emu/` (`sidj_web.c`, `worklet.js`, `index.html`, `build.sh`) | after X0X's browser emulator (`x0x_web.c`, its worklet and page) | GPL-3.0-only |
+| `firmware/src/announce.c`, `tools/gen_words.py` | the screen reader's firmware side, from [fm1-base](https://github.com/charlesvestal/fm1-base) by Charles Vestal (taken at fm1-base 698e2cb, 2026-11-05, copied as [fm1-reader](https://github.com/charlesvestal/fm1-reader)'s `tools/sync_announce.sh`), unchanged | MPL-2.0 (`third_party/licenses/MPL-2.0.txt`), compatible with the GPL |
+| `firmware/words.tsv`, `web/words/` | SiDJ: what its screen's words mean, and the words files built from it | GPL-3.0-only |
 | `web/site/fm1ota.js`, `web/site/fm1pkg.js` | Felucca's web updater, Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments, unchanged | GPL-3.0-only |
 | `web/site/index.html`, `tools/make_site.py` | SiDJ, after Felucca's installer page and `make_site.py` | GPL-3.0-only |
 | `web/site/fm1songs.js`, `tests/{emu_test,site_test}.mjs`, `tests/scenarios/store.in` | SiDJ | GPL-3.0-only |
@@ -31,7 +33,8 @@ as a whole under the terms above.
 
 ### Changed from Felucca and X0X
 
-- `usb.c`: USB audio's five-channel mode with the voices' channel names, its descriptors patched
+- `usb.c`: a SysEx sent from the MIDI queue (ASID) is finished before one from the SysEx queue starts,
+  and that queue holds a whole screen-reader message (128 packets). USB audio's five-channel mode with the voices' channel names, its descriptors patched
   in RAM, the audio streaming interface listed before MIDI (as in Felucca 1.5.1), SiDJ's USB
   names, MIDI clock in timed as it arrives, and MIDI out sent during the audio render.
 - `midi_uart.c`: MIDI clock in from the jack.

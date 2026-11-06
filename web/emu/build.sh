@@ -10,6 +10,7 @@ PY="${PYTHON:-python3}"
 command -v emcc >/dev/null || { echo "web/emu/build.sh: no emcc (brew install emscripten)"; exit 1; }
 mkdir -p build/gen build/emu
 [ -f build/gen/felucca_font.h ] || "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
+"$PY" tools/gen_words.py firmware/words.tsv web/words build/gen/ann_words.h >/dev/null   # the screen reader's words
 U="sid/sid.c sid/sid_tables.c firmware/src/app/engine.c firmware/src/app/remix.c firmware/src/app/asid.c firmware/src/c64/cpu6502.c firmware/src/c64/c64.c firmware/src/c64/sidfile.c"
 # shellcheck disable=SC2086
 emcc -O2 -std=gnu99 -Wall -Wno-unused-function -Wno-unused-parameter -Wno-unused-variable \

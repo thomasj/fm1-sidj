@@ -1,0 +1,45 @@
+# url: https://thomasj.github.io/fm1-sidj/words/
+# SiDJ's words for the screen reader (fm1-reader): the screen's text <TAB> what is said.
+# tools/gen_words.py builds web/words/<id>.json from it; commit that file, never change a published one.
+# the pages and their values (the status line)
+OSC	oscillator
+FLT	filter
+PW #	pulse width #
+PW AUTO	pulse width as the tune
+PW	pulse width
+A #	attack #
+D #	decay #
+S #	sustain #
+R #	release #
+CUT	cutoff
+SIN	sine
+TRI	triangle
+SQR	square
+OUT EMU	output emulated sid
+OUT ASID	output acid
+OUT BOTH	output sid and acid
+OUT SID+CLK	output sid and midi clock
+OUT	output
+# CH	# channels
+MIX+VOICES	mix and voices
+6581	65 81
+8580	85 80
+# the chip and the outputs
+SID+CLK	sid and midi clock
+SID + ASID	sid and acid
+SID + MIDI CLOCK	sid and midi clock
+ASID	acid
+RSID	R sid
+PSID	P sid
+2SID	2 sid
+3SID	3 sid
+SID	sid
+USB-MIDI	U S B midi
+SUBSONG	subsong
+REMIXED	remixed
+RING MOD	ring modulation
+K#	knob #
+# messages
+SCALE x0 .. x16	scale, 0 to 16 times
+F# .. G#	F # to G #
+X PITCH	times pitch

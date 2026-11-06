@@ -19,7 +19,7 @@ The sound comes out three ways, alone or together:
   ASID receiver, with the remix included.
 
 And a **MIDI clock** in time with the tune, found from the tune itself, to sync a drum machine or
-sequencer.
+sequencer. With a **screen reader** on your computer, the FM-1 says what its screen shows.
 
 ▶ **[Watch SiDJ in action](https://youtu.be/bY161B9_Evk)**, a demo video on YouTube.
 
@@ -134,7 +134,7 @@ Drums keep sounding like drums: a voice playing pure noise keeps its waveform an
 
 | Page | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
 | --- | --- | --- | --- | --- |
-| `FX` (OSC) | pulse width | octave | fine tune | |
+| `FX` (OSC) | pulse width (AUTO: the tune's own until turned) | octave | fine tune | |
 | `ENV` | attack | decay | sustain | release |
 | `SEL` (FLT) | cutoff | resonance | | |
 | `LFO` | rate | depth | target: pulse width, pitch or cutoff | shape |
@@ -174,6 +174,15 @@ itself. On the `GLO` page, `KNOB 4` puts a wrong tempo right (or sets one when n
 `KNOB 3` moves the clock; `GLO` & `PLAY` turns a click on the beats on or off (off at each
 start). A clock coming in over USB or the MIDI IN jack starts, stops and continues the song, and
 with SID+CLK the tune follows it. More in [SiDJ over MIDI](docs/midi.md#midi-clock).
+
+## Screen reader
+
+SiDJ tells a screen reader on your computer what its screen shows: the song list, the song playing,
+the pages and knobs as they turn, the remix's switches and the messages. Connect the FM-1 by USB,
+open Charles Vestal's [FM-1 Screen Reader](https://charlesvestal.github.io/fm1-reader/) in Chrome or
+Edge and click Connect. It speaks with its own voice, or hands the text to VoiceOver, NVDA, JAWS or
+TalkBack. While a song plays to real SID hardware over ASID, SiDJ stays quiet so ASID's timing is
+not disturbed; pause to hear it again.
 
 # Installing
 
@@ -262,6 +271,18 @@ and plays it when switched on, ready to play and remix. `tools/release.sh X.Y.Z`
 release: the package, the tests, one commit on the public repository, the GitHub release and the
 site.
 
+The screen reader's words are in `firmware/words.tsv`. Every build turns them into
+`web/words/<fingerprint>.json`: commit each new one and never change an old one, since an FM-1 in the
+wild links to its own; the site publishes them all. With
+[fm1-reader](https://github.com/charlesvestal/fm1-reader) next to this repository, its audit checks
+everything SiDJ can say (after `tests/run_tests.sh`):
+
+```
+mkdir -p build/sr; rm -f build/sr/said.tsv
+for f in build/scenarios/*.sidj; do SIDJ_SAID_LOG=$PWD/build/sr/said.tsv build/host/sidj_host $f build/scenarios >/dev/null; done
+node ../fm1-reader/tools/audit.mjs build/sr/said.tsv --words web/words/<id>.json --allow firmware/words_allow.txt
+```
+
 ## How it works
 
 The design and its reasoning are in [docs/design.md](docs/design.md). In short:
@@ -278,6 +299,8 @@ The design and its reasoning are in [docs/design.md](docs/design.md). In short:
   derives one from the other.
 - **ASID** (`firmware/src/app/asid.c`) sends each frame's changes as one message, cut exactly
   at the raster wrap.
+- **The screen reader** (`speak()` in `firmware/src/app/ui.c`, with fm1-base's `announce.c`) says
+  what changed on the screen; `firmware/words.tsv` says how to read the screen's words.
 - **The MIDI clock** (`firmware/src/app/beat.c`, `engine.c`) finds the tune's beat from when its
   voices start to sound, schedules the pulses at their cycles, and follows a clock coming in by
   steering the tune's speed; `clkstore.c` keeps each song's clock.
@@ -302,6 +325,7 @@ Why reSID 0.16: [docs/engine-choice.md](docs/engine-choice.md).
 | `web/site/`, `web/emu/` | the web page (installer, song manager) and the browser emulator |
 | `tests/` | the host tests and the simulator's scenarios |
 | `tools/` | build, package, install, songs, site, release |
+| `firmware/words.tsv`, `web/words/` | the screen reader's words, and the words files built from them (published with the site) |
 | `docs/` | MIDI control ([docs/midi.md](docs/midi.md)), the design, the FM-1 platform ([docs/platform.md](docs/platform.md)), the engine choice |
 | `third_party/` | reSID 0.16 unmodified, the 6502 functional test, licence texts |
 
@@ -310,7 +334,8 @@ Why reSID 0.16: [docs/engine-choice.md](docs/engine-choice.md).
 SiDJ is free software: GPL-3.0-only for the firmware, GPL-2.0-or-later for the SID engine. It
 is built on [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (the platform, the
 update loader and the installer), by way of [X0X](https://github.com/charlesvestal/fm1-x0x) by
-charlesvestal, and the SID engine is a port of reSID 0.16 by Dag Lem. File-by-file origins and
+charlesvestal, and the SID engine is a port of reSID 0.16 by Dag Lem. The screen reader's firmware
+side is fm1-base's `announce.c` by Charles Vestal (MPL-2.0). File-by-file origins and
 the licence reasoning are in [LICENSING.md](LICENSING.md). It contains no vendor material, no
 Commodore ROMs and nothing from my employer. M-VAVE and FM-1 are trademarks of their owners;
 SiDJ is independent of them.

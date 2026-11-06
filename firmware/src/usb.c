@@ -135,7 +135,7 @@ static uint8_t sx_frame[640];
 static uint32_t sx_pos;
 static volatile uint32_t sx_frame_len;
 static volatile uint8_t sx_ready, sx_collect, sx_busy;
-#define SXQ 64u
+#define SXQ 128u                                       /* SiDJ: a whole screen-reader SAY ((240 + 9) / 3 packets) */
 static uint32_t sx_out_q[SXQ];
 static volatile uint32_t so_w, so_r;
 #endif
@@ -792,6 +792,8 @@ static void ota_frame_done(void)
 }
 #endif
 
+static uint8_t mo_sx;                                   /* SiDJ: a SysEx from midi_out_q (ASID) is part sent: */
+                                                        /* sx_out_q waits for its end, or the two would mix */
 static void ep1_tx(void)
 {
     uint32_t csr, n = 0;
@@ -809,7 +811,7 @@ static void ep1_tx(void)
     if (csr & 0x80u)
         sie_wr(S_TXCSR1, csr & ~0x80u);
 #if FELUCCA_OTA
-    while (so_r != so_w && n < 64u) {                   /* SysEx first, never split by notes */
+    while (!mo_sx && so_r != so_w && n < 64u) {         /* SysEx first, never split by notes */
         uint32_t pkt = sx_out_q[so_r % SXQ];
         ep1tx[n] = (uint8_t)pkt;
         ep1tx[n + 1] = (uint8_t)(pkt >> 8);
@@ -818,7 +820,7 @@ static void ep1_tx(void)
         n += 4u;
         so_r++;
     }
-    while (!sx_busy && so_r == so_w && mo_r != mo_w && n < 64u) {
+    while ((mo_sx || (!sx_busy && so_r == so_w)) && mo_r != mo_w && n < 64u) {
 #else
     while (mo_r != mo_w && n < 64u) {
 #endif
@@ -832,6 +834,8 @@ static void ep1_tx(void)
         n += 4u;
         RING_PUBLISH();
         mo_r++;
+        if ((pkt & 15u) == 4u) mo_sx = 1;               /* (SysEx started or going on) */
+        else if ((pkt & 15u) >= 5u && (pkt & 15u) <= 7u) mo_sx = 0;   /* (ended) */
     }
     if (!n)
         return;
@@ -1118,6 +1122,7 @@ static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
         usb.config = 0;
         usb.suspended = 0;
         mo_r = mo_w;                                    /* nothing stale for the next host */
+        mo_sx = 0;
         usb.sx_on = 0;
 #if FELUCCA_OTA
         so_r = so_w;

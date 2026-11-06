@@ -86,20 +86,25 @@ static struct {
     uint32_t scroll_t0;                     /* when that song loaded: where the scroll is */
     uint32_t lit_keys;
 } ui;
+static uint32_t sp_turn_t;                  /* the screen reader: when a knob or a CC last moved a value (speak) ... */
+static int sp_turn_k = -1;                  /* ... and which knob (0 .. 3; -1: a CC) */
 #define NLANES 17                           /* the keys' sources: MIDI channels 1 .. 16, the FM-1's keys */
 #define KB_LANE 16
 static struct { uint32_t on[4], age; uint8_t sound; } lane[NLANES];   /* held notes; sound: note + 1, 0 */
 static uint32_t lane_clock;
 
-static void ui_say(const char *a, const char *b)
+static void ui_say_flags(const char *a, const char *b, uint32_t flags)   /* the message line, and the screen reader */
 {
     uint32_t i = 0;
+    ann_say(a, b, flags);
     for (; *a && i < sizeof ui.msg - 1; a++) ui.msg[i++] = *a;
     if (b) for (; *b && i < sizeof ui.msg - 1; b++) ui.msg[i++] = *b;
     ui.msg[i] = 0;
     ui.msg_until = plat_ms() + 1500u;
     ui.dirty_status = 1;
 }
+static void ui_say(const char *a, const char *b) { ui_say_flags(a, b, ANN_NOW); }
+static void ui_warn(const char *a, const char *b) { ui_say_flags(a, b, ANN_NOW | ANN_KEEP); }   /* what did not happen */
 
 static void ui_num(char *b, int v)         /* decimal into b (which has room), signed */
 {
@@ -160,7 +165,7 @@ static void ui_bpm_text(char *b, uint32_t x10) { char d[2] = {(char)('0' + x10 %
 static void ui_say_output(void)             /* the output turned; an RSID never goes out as ASID */
 {
     int shown = eng_loaded && (ui.mode == UI_PLAYER || ui.sel == ui.cur);   /* the song on screen is the one loaded */
-    if (set.output && shown && eng_deck_off) ui_say(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
+    if (set.output && shown && eng_deck_off) ui_warn(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
     else if (set.output == ENG_OUT_CLOCK && shown && eng_playing && !eng_clk_tried) ui_say("SID + MIDI CLOCK: FROM THE NEXT LOAD", 0);
     else if (set.output == ENG_OUT_CLOCK) { ui.msg_until = 0; ui.hint_until = plat_ms() + 4000u; ui.dirty_status = 1; }
     else ui_say("OUTPUT: ", OUT_NAME[set.output]);
@@ -175,15 +180,15 @@ static int ui_load(int k, int subsong, int play)   /* play 0: loaded, ready for 
     uint8_t opts;
     int again;
     if (!f || eng_file.pending || size > ENG_FILE_MAX) return -1;
-    if (!song_file_ok(k)) { ui_say("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }   /* (not played: it could crash) */
-    if (sidfile_parse(&sf, f, size)) { ui_say("NOT A SID FILE", 0); return -1; }
-    if (sf.basic) { ui_say("BASIC TUNE: NOT SUPPORTED", 0); return -1; }
-    if (sidfile_nsids(&sf) > 1) { ui_say(sidfile_nsids(&sf) == 2 ? "2SID TUNE: NOT SUPPORTED" : "3SID TUNE: NOT SUPPORTED", 0); return -1; }
+    if (!song_file_ok(k)) { ui_warn("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }   /* (not played: it could crash) */
+    if (sidfile_parse(&sf, f, size)) { ui_warn("NOT A SID FILE", 0); return -1; }
+    if (sf.basic) { ui_warn("BASIC TUNE: NOT SUPPORTED", 0); return -1; }
+    if (sidfile_nsids(&sf) > 1) { ui_warn(sidfile_nsids(&sf) == 2 ? "2SID TUNE: NOT SUPPORTED" : "3SID TUNE: NOT SUPPORTED", 0); return -1; }
     if (k != ui.file_k) {   /* (unpacked here, in the main loop: the audio carries on; the same song again: as it is) */
         int got;
         ui.file_k = -1;
         got = song_load(k, eng_file.data, ENG_FILE_MAX);
-        if (got < 0) { ui_say("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }
+        if (got < 0) { ui_warn("SONG DAMAGED IN FLASH: ADD IT AGAIN", 0); return -1; }
         eng_file.len = (uint32_t)got;
         ui.file_k = k;
     }
@@ -435,7 +440,7 @@ static void cc_flush(void)                 /* what came in goes on, the latest v
     for (i = 0; i < NCC; i++)
         for (v = 0; v < 3; v++)
             if (cc_pend[i][v] && cc_send(i, v, cc_pend[i][v] - 1) == 0) { cc_pend[i][v] = 0; any = 1; }
-    if (any) { ui.dirty_status = ui.dirty_voices = ui.dirty_filter = 1; ui.activity = 1; }
+    if (any) { ui.dirty_status = ui.dirty_voices = ui.dirty_filter = 1; ui.activity = 1; sp_turn_t = plat_ms(); sp_turn_k = -1; }
 }
 
 static void ui_midi_start(void)            /* MIDI Start: the song on screen from its start, playing */
@@ -480,7 +485,7 @@ static void ui_set_key_mode(int m)
         ui.key_mode = (uint8_t)m;
         keys_send();
     }
-    ui_say("KEYS: ", m == KM_SHIFT ? "TRANSPOSE (F#4 = 0)" : "SET THE PITCH");
+    ui_say("KEYS: ", m == KM_SHIFT ? "TRANSPOSE FROM F#4" : "SET THE PITCH");
     ui.dirty_voices = 1;
 }
 
@@ -564,7 +569,7 @@ static void ui_play_btn(uint32_t held)
         return;
     }
     if (ui.mode == UI_SONGS) {
-        if (!song_count) { ui_say("NO SONGS YET: SEE ABOVE", 0); return; }
+        if (!song_count) { ui_warn("NO SONGS YET: SEE ABOVE", 0); return; }
         if (ui.sel == ui.cur && eng_loaded && !eng_playing && !ui.ended && !ui_needs_tempo()) eng_post(EV_PLAY, 0, 0, 0);   /* loaded and waiting (its subsong kept) */
         else if (ui_load(ui.sel, ui.sel == ui.cur && ui_needs_tempo() ? ui.subsong : 0, 1)) return;
         ui.mode = UI_PLAYER; lcd_fill(0, 0, 240, 240, C_BLACK); ui.dirty_top = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
@@ -587,6 +592,7 @@ static void ui_rx_knob(int k, int32_t d, int enc)
     uint32_t now = plat_ms();
     int fast = (now - ui.enc_t[enc]) < 40u;
     ui.enc_t[enc] = now;
+    sp_turn_t = now; sp_turn_k = k;
     switch (ui.page) {
     case PG_FX:
         if (k == 0) eng_post(EV_RX, RX_P_PW, ui.voice, (uint32_t)(d * (fast ? 128 : 32)));
@@ -601,22 +607,22 @@ static void ui_rx_knob(int k, int32_t d, int enc)
         else if (k == 1) eng_post(EV_RX, RX_P_RES, 0, (uint32_t)d);
         break;
     case PG_LFO:                            /* the selected voice's LFO: rate, depth, target, shape */
-        if (eng_deck_off) { ui_say("RSID: NO LFO", 0); break; }
+        if (eng_deck_off) { ui_warn("RSID: NO LFO", 0); break; }
         if (k == 0) eng_post(EV_RX, RX_P_LFO_RATE, ui.voice, (uint32_t)(d * (fast ? 4 : 1)));
         else if (k == 1) eng_post(EV_RX, RX_P_LFO_DEPTH, ui.voice, (uint32_t)(d * (fast ? 4 : 1)));
         else eng_post(EV_RX, k == 2 ? RX_P_LFO_TARGET : RX_P_LFO_SHAPE, ui.voice, (uint32_t)(d > 0 ? 1 : -1));
         break;
     case PG_GLO:                            /* the deck: tempo (%) and the vinyl fader (0.1 %) */
-        if (eng_deck_off && k < 2) { ui_say("RSID: NO TEMPO OR PITCH", 0); break; }
+        if (eng_deck_off && k < 2) { ui_warn("RSID: NO TEMPO OR PITCH", 0); break; }
         if (k < 2 && d > 0 && (k == 1 ? eng_vinyl >= 0 : 1)   /* up at the cap: say why it stops */
             && (uint32_t)eng_tempo * (uint32_t)(1000 + (eng_vinyl > 0 ? eng_vinyl : 0)) >= (uint32_t)eng_speed_cap() * 1000u - 1000u) {
-            ui_say(eng_usb4 ? "LIMIT 100 %: USB MIX + VOICES" : "LIMIT 150 %: TEMPO X PITCH", 0);
+            ui_warn(eng_usb4 ? "NO FASTER: 100 % WITH USB MIX + VOICES" : "NO FASTER: 150 % (TEMPO X PITCH)", 0);
             break;
         }
         if (k == 2) {                       /* SID+CLK: the clock's offset, ms (kept with the song): not the remix */
             int o = (int)eng_clk_offset_ms + d * (fast ? 25 : 5);
             char b2[24] = "CLOCK OFFSET: ";
-            if (!clk_bpm_shown()) { ui_say(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 3: THE MIDI CLOCK (SID+CLK)", 0); break; }
+            if (!clk_bpm_shown()) { ui_warn(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 3: THE MIDI CLOCK (SID+CLK)", 0); break; }
             o = o < -ENG_CLK_OFFSET_MAX ? -ENG_CLK_OFFSET_MAX : o > ENG_CLK_OFFSET_MAX ? ENG_CLK_OFFSET_MAX : o;
             eng_post(EV_CLOCK_OFFSET, 0, 0, (uint32_t)o);
             eng_clk_offset_ms = (int16_t)o;
@@ -655,7 +661,7 @@ static void ui_rx_knob(int k, int32_t d, int enc)
         if (k == 3) {                       /* SID+CLK: the clock's tempo put right (half, double ...): not the remix */
             int r = (int)eng_clk_ratio + (d > 0 ? 1 : -1);
             char b2[24] = "MIDI CLOCK: ";
-            if (!clk_bpm_shown()) { ui_say(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 4: THE MIDI CLOCK (SID+CLK)", 0); break; }
+            if (!clk_bpm_shown()) { ui_warn(set.output == ENG_OUT_CLOCK ? "NO TEMPO FOUND: SET ONE WITH GLO K4" : "KNOB 4: THE MIDI CLOCK (SID+CLK)", 0); break; }
             if (r < 0 || r >= ENG_CLK_RATIOS) break;
             eng_post(EV_CLOCK_RATIO, (uint8_t)r, 0, 0);
             eng_clk_ratio = (uint8_t)r;    /* (shown at once; the engine takes it from the clock's next beat) */
@@ -759,7 +765,7 @@ static void ui_input(void)
         for (i = 0; i < 4; i++)
             if ((d = ui_enc(EN_K1 + i)) != 0) ui_rx_knob(i, d, EN_K1 + i);
     } else {
-        if (pressed & (1u << B_SAVE)) { set.song = (uint16_t)ui.sel; ui_say(settings_save() == 0 ? "SETTINGS SAVED" : "SAVE FAILED", 0); }
+        if (pressed & (1u << B_SAVE)) { set.song = (uint16_t)ui.sel; if (settings_save() == 0) ui_say("SETTINGS SAVED", 0); else ui_warn("SAVE FAILED", 0); }
         if ((d = ui_enc(EN_SELECT)) != 0 && song_count) {
             ui.sel = song_at(song_pos(ui.sel) + (int)d);
             ui.dirty_list = 1;
@@ -1389,8 +1395,29 @@ static int st_tag(int x, const char *name)  /* the status line: the page, invert
     return cv_text(x, 6, &FONT_XS, name, C_BLACK) + 8;
 }
 
+/* the screen reader (speak, below): the status line's fields as last drawn, a label and a value each */
+#define ST_CAP 8
+static struct { uint8_t n, off; int8_t knob[ST_CAP]; char lab[ST_CAP][16], val[ST_CAP][24]; uint32_t ctx; } st_cap __attribute__((section(".pool")));
+static int clk_bpm_shown(void);
+static uint32_t sp_ctx(void)                /* what the fields belong to: the screen, page, voice, the clock's fields */
+{
+    return (uint32_t)ui.mode | (uint32_t)ui.page << 2 | (uint32_t)ui.voice << 5 | (uint32_t)clk_bpm_shown() << 7 | 1u << 8;
+}
+static void st_cap_add(int knob, const char *label, const char *value)
+{
+    int i;
+    if (st_cap.n >= ST_CAP || st_cap.off) return;
+    st_cap.knob[st_cap.n] = (int8_t)knob;
+    for (i = 0; label && label[i] && i < 15; i++) st_cap.lab[st_cap.n][i] = label[i];
+    st_cap.lab[st_cap.n][label ? i : 0] = 0;
+    for (i = 0; value[i] && i < 23; i++) st_cap.val[st_cap.n][i] = value[i];
+    st_cap.val[st_cap.n][i] = 0;
+    st_cap.n++;
+}
+
 static int st_field(int x, const char *label, const char *value, uint16_t c)   /* the status line: the next x */
 {
+    st_cap_add(0, label, value);
     if (label) x = cv_text(x, 6, &FONT_XS, label, C_DIM) + 3;
     return cv_text(x, 6, &FONT_XS, value, c) + 7;
 }
@@ -1398,6 +1425,7 @@ static int st_field(int x, const char *label, const char *value, uint16_t c)   /
 static int st_kfield(int x, int knob, const char *label, const char *value, uint16_t c)   /* "K1 PW 384" */
 {
     char k[3] = {'K', (char)('0' + knob), 0};
+    st_cap_add(knob, label, value);
     x = cv_text(x, 6, &FONT_XS, k, C_DIM) + 3;
     if (label) x = cv_text(x, 6, &FONT_XS, label, C_DIM) + 3;
     return cv_text(x, 6, &FONT_XS, value, c) + 5;
@@ -1408,12 +1436,8 @@ static void draw_status(void)               /* rows 216 .. 239 */
     char b[48], t[12];
     uint32_t now = plat_ms();
     cv_begin(240, 24, C_BLACK);
-    if (now < ui.msg_until) {
-        cv_text(4, 4, &FONT_S, ui.msg, C_WHITE);
-    } else if (now < ui.hint_until && set.output == ENG_OUT_CLOCK) {   /* as the knobs' fields */
-        int px = st_field(4, "OUT", "SID + MIDI CLOCK", C_WHITE);
-        st_field(px + 6, "GLO+PLAY", "CLICK", C_GRAY);
-    } else if (ui.mode == UI_SONGS) {
+    st_cap.n = 0;                           /* the fields always (the screen reader's), a message drawn over them */
+    if (ui.mode == UI_SONGS) {
         int px = 4;                         /* the settings by their knobs, SAVE keeps them */
         if (set.model == 0) {               /* the file's: the selected song's chip, and AUTO */
             uint32_t size = 0;
@@ -1421,6 +1445,7 @@ static void draw_status(void)               /* rows 216 .. 239 */
             sidfile_t sf;
             int is8580 = f && sidfile_parse(&sf, f, size) == 0 && sidfile_model(&sf, 0) == SID_MODEL_8580;
             px = st_kfield(px, 1, 0, is8580 ? "8580" : "6581", C_GRAY) - 2;   /* (the chip needs no label) */
+            if (st_cap.n) { char *v = st_cap.val[st_cap.n - 1]; ui_cat(v, " AUTO"); }   /* (said with it) */
             px = cv_text(px, 6, &FONT_XS, "AUTO", C_DIM) + 11;
         } else px = st_kfield(px, 1, 0, set.model == 1 ? "6581" : "8580", C_GRAY) + 6;
         px = st_kfield(px, 2, "OUT", set.output == 0 ? "EMU" : set.output == 1 ? "ASID" : set.output == 2 ? "BOTH" : "SID+CLK", C_GRAY) + 6;
@@ -1434,7 +1459,8 @@ static void draw_status(void)               /* rows 216 .. 239 */
         }
         px = st_tag(px + 2, PG_NAME[ui.page]);
         if (ui.page == PG_FX) {             /* each value by its knob: K1, K2 ... (as SONGS) */
-            ui_num(t, x->pw_ovr ? x->pw_val : remix_tune_pw(&rx, ui.voice));
+            if (x->pw_ovr) ui_num(t, x->pw_val);   /* the pulse width set; until then the tune's own, moving: AUTO */
+            else { t[0] = 'A'; t[1] = 'U'; t[2] = 'T'; t[3] = 'O'; t[4] = 0; }   /* (as the chip's AUTO in SONGS) */
             px = st_kfield(px, 1, "PW", t, x->pw_ovr ? C_RMX : C_GRAY);
             t[0] = 0; if (x->oct >= 0) ui_cat(t, "+"); ui_num(t + ui_strlen(t), x->oct);
             px = st_kfield(px, 2, "OCT", t, x->oct ? C_RMX : C_GRAY);
@@ -1484,6 +1510,14 @@ static void draw_status(void)               /* rows 216 .. 239 */
             px = st_kfield(px, 2, "RES", t, rx.res_off ? C_RMX : C_GRAY);
         }
         (void)px;                           /* (the output and the load: the top bar, tools/fm1_sid.py stats) */
+    }
+    st_cap.ctx = sp_ctx();
+    if (now < ui.msg_until || (now < ui.hint_until && set.output == ENG_OUT_CLOCK)) {   /* a message, or the hint */
+        cv_begin(240, 24, C_BLACK);
+        st_cap.off = 1;                     /* (not fields) */
+        if (now < ui.msg_until) cv_text(4, 4, &FONT_S, ui.msg, C_WHITE);
+        else { int px = st_field(4, "OUT", "SID + MIDI CLOCK", C_WHITE); st_field(px + 6, "GLO+PLAY", "CLICK", C_GRAY); }   /* as the knobs' fields */
+        st_cap.off = 0;
     }
     cv_blit(0, 216);
 }
@@ -1656,6 +1690,285 @@ static void intro_end(void)
     ui.dirty_top = ui.dirty_list = ui.dirty_voices = ui.dirty_filter = ui.dirty_status = 1;
 }
 
+/* ------------------------------------------------------- screen reader --- */
+/* what changed on the screen, for a reader on the computer (announce.c; fm1-reader): the screen and its
+ * page with their values on a WHERE or a change of context, a knob's value as it turns, the song list's
+ * row, the song loaded, play and pause, and the remix's switches. The texts are the screen's own; SiDJ's
+ * words file (firmware/words.tsv) says how to read them */
+static const uint8_t KNOB_SAY_N[NPG] = {0, 0, 0, 4, 4};   /* pages whose fields have no label on screen */
+static const char *const KNOB_SAY[NPG][4] = {{0}, {0}, {0}, {"RATE", "DEPTH", "TARGET", "SHAPE"},
+                                             {"TEMPO", "PITCH", "CLOCK OFFSET", "CLOCK"}};
+static const char *const SONGS_KNOB[4] = {"", "CHIP", "OUTPUT", "USB AUDIO"};
+static struct {
+    uint8_t started, mode, page, voice, playing, ended, nf, where;
+    int sel, cur, sub;
+    uint32_t ctx;
+    uint8_t vs[RX_NV][7], fm[2], cut, keys;
+    char f[ST_CAP][40];
+} sp __attribute__((section(".pool")));     /* (the pool: zeroed at start; the RAM region is full) */
+static char sp_buf[ANN_MAX + 1] __attribute__((section(".pool")));   /* (not on the system stack) */
+static int sp_same(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }   /* (no libc) */
+
+static void sp_add(const char *t)           /* sp_buf += t, cut at its end */
+{
+    uint32_t n = (uint32_t)ui_strlen(sp_buf);
+    while (*t && n < ANN_MAX) sp_buf[n++] = *t++;
+    sp_buf[n] = 0;
+}
+static void sp_num(int v) { char t[12]; ui_num(t, v); sp_add(t); }
+static const char *sp_text(void)            /* sp_buf, its trailing spaces cut */
+{
+    int n = ui_strlen(sp_buf);
+    while (n && sp_buf[n - 1] == ' ') sp_buf[--n] = 0;
+    return sp_buf;
+}
+static void sp_time(uint32_t ds)            /* "3 MINUTES 5 SECONDS" (m:ss would be read as a ratio) */
+{
+    uint32_t m = ds / 600u, sec = ds / 10u % 60u;
+    if (m) { sp_num((int)m); sp_add(m == 1 ? " MINUTE " : " MINUTES "); }
+    sp_num((int)sec); sp_add(sec == 1 ? " SECOND" : " SECONDS");
+}
+static void sp_field(int i)                 /* one status field: its name, then its value */
+{
+    const char *l = st_cap.lab[i];
+    int k = st_cap.knob[i];
+    if (!*l && ui.mode == UI_SONGS && k >= 1 && k <= 3) l = SONGS_KNOB[k];
+    else if (!*l && ui.mode == UI_PLAYER && k >= 1 && k <= KNOB_SAY_N[ui.page]) l = KNOB_SAY[ui.page][k - 1];
+    if (*l) { sp_add(l); sp_add(" "); }
+    {                                       /* the value, a space between a number and its unit ("183BPM", "0.05HZ") */
+        const char *v = st_cap.val[i];
+        char t[2] = {0, 0};
+        if (v[0] == 'x' && v[1] >= '0' && v[1] <= '9') { sp_add(v + 1); sp_add(" TIMES"); return; }   /* the cutoff's scale */
+        for (; *v; v++) {
+            if (v > st_cap.val[i] && v[-1] >= '0' && v[-1] <= '9' && *v >= 'A' && *v <= 'Z') sp_add(" ");
+            t[0] = *v; sp_add(t);
+        }
+    }
+}
+static void sp_fields(void)                 /* all of them, each in its own phrase */
+{
+    int i;
+    for (i = 0; i < st_cap.n; i++) { if (i) sp_add(", "); sp_field(i); }
+    if (st_cap.n) sp_add(".");
+}
+static void sp_name(const char *t)          /* a name from the file: "&" said as AND */
+{
+    char c[2] = {0, 0};
+    for (; *t; t++) { if (*t == '&') sp_add("AND"); else { c[0] = *t; sp_add(c); } }
+}
+static void sp_song(int k, int with_pos)    /* "COMMANDO BY ROB HUBBARD, 3 OF 26" */
+{
+    char b[48];
+    const uint8_t *nm = song_hvsc_name(k);
+    if (!nm) return;
+    ui_hvsc_str(b, nm, 32); sp_name(b);
+    ui_hvsc_str(b, nm + HVSC_AUTHOR, 32);
+    if (b[0]) { sp_add(" BY "); sp_name(b); }
+    if (with_pos) { sp_add(", "); sp_num(song_pos(k) + 1); sp_add(" OF "); sp_num(song_count); }
+}
+static void sp_player(void)                 /* the player's top lines */
+{
+    const uint16_t *len = 0; int nlen = 0;
+    if (ui.cur < 0) { sp_add(song_count ? "SELECT A SONG, PRESS PLAY. " : "NO SONGS YET. "); return; }
+    sp_song(ui.cur, 0); sp_add(". ");
+    if (ui.nsongs > 1) { sp_add("SUBSONG "); sp_num(ui.subsong); sp_add(" OF "); sp_num(ui.nsongs); sp_add(". "); }
+    sp_add(!eng_loaded ? "LOADING" : eng_playing ? "PLAYING" : ui.ended ? "ENDED" : "PAUSED");
+    song_file(ui.cur, 0, &len, &nlen);
+    if (eng_loaded) {
+        sp_add(", "); sp_time(eng_elapsed_ds());
+        if (len && ui.subsong <= nlen && len[ui.subsong - 1]) { sp_add(" OF "); sp_time(len[ui.subsong - 1]); }
+    }
+    sp_add(". ");
+    if (remix_sig() & 1u) sp_add("REMIXED. ");
+}
+static void sp_page(void)                   /* the page and its values */
+{
+    if (ui.mode == UI_SONGS) { sp_fields(); return; }
+    sp_add("PAGE "); sp_add(PG_NAME[ui.page]);
+    if (ui.page == PG_FX || ui.page == PG_ENV || ui.page == PG_LFO) { sp_add(", VOICE "); sp_num(ui.voice + 1); }
+    sp_add(". ");
+    { int i, from = st_cap.n && !st_cap.knob[0] && !st_cap.lab[0][0] && st_cap.val[0][0] == 'V' && st_cap.val[0][1] >= '1' && st_cap.val[0][1] <= '3' ? 1 : 0;   /* (the voice tag: said above) */
+      for (i = from; i < st_cap.n; i++) { if (i > from) sp_add(", "); sp_field(i); }
+      if (st_cap.n > from) sp_add("."); }
+}
+static void sp_where(void)                  /* everything on the screen */
+{
+    sp_buf[0] = 0;
+    if (ui.mode == UI_SONGS) {
+        sp_add("SONGS. "); sp_num(song_count); sp_add(song_count == 1 ? " SONG, " : " SONGS, ");
+        sp_num((int)((song_end - SONG_POOL_BASE) * 100u / SONG_POOL_SIZE)); sp_add(" % USED. ");
+        if (song_count) { sp_song(ui.sel, 1); sp_add(". "); }
+        sp_fields();
+    } else {
+        sp_add("PLAYER. "); sp_player(); sp_page();
+    }
+}
+static void sp_voice_change(int v, const uint8_t *was, const uint8_t *now)   /* a voice's switches */
+{
+    static const char *const WN[4] = {"TRIANGLE", "SAWTOOTH", "PULSE", "NOISE"};
+    int i;
+    if (was[0] != now[0]) { sp_add("VOICE "); sp_num(v + 1); sp_add(now[0] ? " MUTED. " : " ON. "); }
+    if (was[1] != now[1] || was[2] != now[2]) {
+        sp_add("VOICE "); sp_num(v + 1); sp_add(" ");
+        if (!now[1]) sp_add("WAVEFORM AS THE TUNE. ");
+        else for (i = 0; i < 4; i++) if (now[2] & (SID_CTRL_TRI << i)) { sp_add(WN[i]); sp_add(". "); break; }
+    }
+    if ((was[3] ^ now[3]) & SID_CTRL_SYNC || ((was[4] ^ now[4]) & SID_CTRL_SYNC)) {
+        sp_add("VOICE "); sp_num(v + 1);
+        sp_add(!(now[3] & SID_CTRL_SYNC) ? " SYNC AS THE TUNE. " : (now[4] & SID_CTRL_SYNC) ? " SYNC ON. " : " SYNC OFF. ");
+    }
+    if ((was[3] ^ now[3]) & SID_CTRL_RING || ((was[4] ^ now[4]) & SID_CTRL_RING)) {
+        sp_add("VOICE "); sp_num(v + 1);
+        sp_add(!(now[3] & SID_CTRL_RING) ? " RING MOD AS THE TUNE. " : (now[4] & SID_CTRL_RING) ? " RING MOD ON. " : " RING MOD OFF. ");
+    }
+    if (was[5] != now[5] || was[6] != now[6]) {
+        sp_add("VOICE "); sp_num(v + 1);
+        sp_add(!now[5] ? " FILTER AS THE TUNE. " : now[6] ? " THROUGH THE FILTER. " : " AROUND THE FILTER. ");
+    }
+}
+
+#ifdef SIDJ_HOST
+/* `speakdump` (host): every screen, page, value name and switch as speak() would send it, a kind and a
+ * tab before each, for fm1-reader's audit (tools/audit.mjs) */
+static void speak_dump(void)
+{
+    static const char *const OUTS[4] = {"EMU", "ASID", "BOTH", "SID+CLK"};
+    uint8_t m = ui.mode, pg = ui.page, vc = ui.voice, w[7] = {0}, n7[7];
+    int i, v, t, sh;
+    rx_voice_t keep = rx.v[0];
+    ui.mode = UI_SONGS; draw_status(); sp_where(); printf("SCREEN\t%s\n", sp_text());
+    for (i = 0; i < 4; i++) { printf("VALUE\tOUT %s\n", OUTS[i]); printf("MSG\tOUTPUT: %s\n", OUT_NAME[i]); }
+    ui.mode = UI_PLAYER;
+    for (i = 0; i < NPG; i++) {
+        ui.page = (uint8_t)i;
+        for (v = 0; v < RX_NV; v++) {
+            ui.voice = (uint8_t)v; draw_status(); sp_buf[0] = 0; sp_page(); printf("PAGE\t%s\n", sp_text());
+            if (i != PG_FX && i != PG_ENV && i != PG_LFO) break;
+        }
+    }
+    ui.voice = 0; ui.page = PG_LFO;
+    for (t = 0; t < RX_LFO_NTARGET; t++) for (sh = 0; sh < RX_LFO_NSHAPE; sh++) {
+        rx.v[0].lfo_target = (uint8_t)t; rx.v[0].lfo_shape = (uint8_t)sh; rx.v[0].lfo_depth = 40;
+        draw_status(); sp_buf[0] = 0; sp_page(); printf("PAGE\t%s\n", sp_text());
+    }
+    rx.v[0] = keep;
+    sp_where(); printf("SCREEN\t%s\n", sp_text());
+    for (i = 0; i < 7; i++) for (v = 1; v <= 0x80; v <<= 1) {   /* each switch, on and off */
+        if (i == 1 || (i == 2 && !(v & SID_CTRL_WAVES))) continue;   /* (the waveform: with its override, below) */
+        memset(n7, 0, 7); n7[i] = (uint8_t)v;
+        if (i == 2) n7[1] = 1;
+        if (i == 4) n7[3] = (uint8_t)v;
+        if (i == 6) n7[5] = 1;
+        sp_buf[0] = 0; sp_voice_change(1, w, n7); if (sp_buf[0]) printf("SWITCH\t%s\n", sp_text());
+        sp_buf[0] = 0; sp_voice_change(1, n7, w); if (sp_buf[0]) printf("SWITCH\t%s\n", sp_text());
+        if (i == 0 || i == 5) break;
+    }
+    printf("SWITCH\tLOW-PASS ON.\nSWITCH\tBAND-PASS OFF.\nSWITCH\tHIGH-PASS AS THE TUNE.\n");
+    printf("STATE\tPLAYING\nSTATE\tPAUSED\nSTATE\tENDED\nSTATE\tLOADING\nSTATE\tREMIXED.\n");
+    ui.mode = m; ui.page = pg; ui.voice = vc;
+}
+#endif
+
+static void speak(uint32_t now)
+{
+    uint32_t ctx;
+    int v, i, fchg = -1, nchg = 0;
+    uint8_t vs[RX_NV][7], fm[2];
+    if (!ann_on()) { sp.started = 0; return; }
+    ctx = sp_ctx();
+    for (v = 0; v < RX_NV; v++) {
+        const rx_voice_t *x = &rx.v[v];
+        vs[v][0] = x->mute; vs[v][1] = x->wave_ovr; vs[v][2] = x->wave_ovr ? x->wave_val : 0;
+        vs[v][3] = x->sr_ovr; vs[v][4] = x->sr_val & x->sr_ovr; vs[v][5] = x->filt_ovr; vs[v][6] = x->filt_ovr ? x->filt_val : 0;
+    }
+    fm[0] = rx.fmode_ovr; fm[1] = rx.fmode_val & rx.fmode_ovr;
+    if (ann_where()) sp.where = 1;          /* (asked for, or a new reader: kept until said) */
+    if (st_cap.ctx != ctx) return;          /* the status line not yet drawn for this screen: its next frame */
+    if (!sp.started || sp.where) {          /* everything, now */
+        sp.where = 0;
+        sp_where();
+        ann_say(sp_text(), 0, ANN_NOW);
+        goto keep;
+    }
+    sp_buf[0] = 0;                          /* the remix's switches (a solo, a waveform: even with a voice chosen at once) */
+    for (v = 0; v < RX_NV; v++) if (memcmp(vs[v], sp.vs[v], 7)) sp_voice_change(v, sp.vs[v], vs[v]);
+    if (memcmp(fm, sp.fm, 2)) {
+        static const char *const FN[3] = {"LOW-PASS", "BAND-PASS", "HIGH-PASS"};
+        for (i = 0; i < 3; i++) {
+            uint8_t bit = (uint8_t)(0x10u << i);
+            if (!((fm[0] ^ sp.fm[0]) & bit) && !((fm[1] ^ sp.fm[1]) & bit)) continue;
+            sp_add(FN[i]); sp_add(!(fm[0] & bit) ? " AS THE TUNE. " : (fm[1] & bit) ? " ON. " : " OFF. ");
+        }
+    }
+    {   /* (a new song resets them, and so does OCT- + OCT+, said as REMIX RESET: not the list) */
+        int any = fm[0] != 0, many = 0;
+        for (v = 0; v < RX_NV; v++) { for (i = 0; i < 7; i++) any |= vs[v][i] != 0; many += memcmp(vs[v], sp.vs[v], 7) != 0; }
+        many += memcmp(fm, sp.fm, 2) != 0;
+        if (sp_buf[0] && sp.mode == ui.mode && sp.cur == ui.cur && (any || many < 2)) ann_say(sp_text(), 0, ANN_NOW);
+    }
+    if (ui.mode != sp.mode || ctx != sp.ctx) {   /* another screen, page or voice: it and its values, once it settles */
+        sp_buf[0] = 0;
+        if (ui.mode != sp.mode) { sp_where(); }
+        else sp_page();
+        ann_later(sp_text(), ANN_NOW, 200, now);
+        goto keep;
+    }
+    sp_buf[0] = 0;
+    if (ui.mode == UI_SONGS && ui.sel != sp.sel && song_count) {   /* the list's row; a new composer first */
+        const uint8_t *a = song_hvsc_name(ui.sel), *b = sp.sel >= 0 && sp.sel < song_count ? song_hvsc_name(sp.sel) : 0;
+        char t[48];
+        if (a && (!b || memcmp(a + HVSC_AUTHOR, b + HVSC_AUTHOR, 32))) { ui_hvsc_str(t, a + HVSC_AUTHOR, 32); sp_name(t); sp_add(". "); }
+        if (a) { ui_hvsc_str(t, a, 32); sp_name(t); sp_add(", "); sp_num(song_pos(ui.sel) + 1); sp_add(" OF "); sp_num(song_count); }
+        ann_later(sp_text(), ANN_NOW, 120, now);
+        goto keep;
+    }
+    if (ui.mode == UI_PLAYER && (ui.cur != sp.cur || ui.subsong != sp.sub) && ui.cur >= 0 && eng_loaded) {   /* a song loaded */
+        sp_song(ui.cur, 0);
+        if (ui.nsongs > 1) { sp_add(", SUBSONG "); sp_num(ui.subsong); sp_add(" OF "); sp_num(ui.nsongs); }
+        sp_add(eng_playing ? ", PLAYING" : ", PAUSED");
+        ann_say(sp_text(), 0, 0);              /* (after a message the load gave) */
+        goto keep;
+    }
+    if (ui.mode == UI_PLAYER && eng_loaded && ui.cur == sp.cur && ((uint8_t)eng_playing != sp.playing) && !ui.ended && !sp.ended) {
+        ann_say(eng_playing ? "PLAYING" : "PAUSED", 0, ANN_NOW);
+        goto keep;
+    }
+    if (now - sp_turn_t > 800u) goto keep;  /* values that move by themselves (the tune's pulse width): not said;
+                                             * (800 ms: the status line shows the engine's value up to 500 ms late) */
+    for (i = 0; i < st_cap.n && i < sp.nf; i++) {   /* a value turning: its name and value */
+        char t[40];
+        sp_buf[0] = 0; sp_field(i);
+        for (v = 0; sp_buf[v] && v < 39; v++) t[v] = sp_buf[v];
+        t[v] = 0;
+        if (!sp_same(t, sp.f[i])) { if (fchg < 0) fchg = i; nchg++; }
+    }
+    if (fchg >= 0 && nchg <= 2) {           /* (more at once: a new song's values, not a knob) */
+        for (i = 0; i < st_cap.n; i++)      /* the turned knob's own field, if it changed (not another moving with it) */
+            if (sp_turn_k >= 0 && st_cap.knob[i] == sp_turn_k + 1 && i < sp.nf) {
+                char t[40];
+                sp_buf[0] = 0; sp_field(i);
+                for (v = 0; sp_buf[v] && v < 39; v++) t[v] = sp_buf[v];
+                t[v] = 0;
+                fchg = !sp_same(t, sp.f[i]) ? i : -1;
+                break;
+            }
+        if (sp_turn_k >= 0 && (fchg < 0 || st_cap.knob[fchg] != sp_turn_k + 1)) goto keep;   /* (another value moved by itself) */
+        sp_buf[0] = 0; sp_field(fchg);
+        ann_later(sp_text(), ANN_NOW, 120, now);
+    }
+keep:
+    sp.started = 1;
+    sp.mode = ui.mode; sp.ctx = ctx; sp.sel = ui.sel; sp.cur = ui.cur; sp.sub = ui.subsong;
+    sp.playing = (uint8_t)eng_playing; sp.ended = ui.ended;
+    memcpy(sp.vs, vs, sizeof vs); memcpy(sp.fm, fm, sizeof fm);
+    sp.nf = st_cap.n;
+    for (i = 0; i < st_cap.n; i++) {
+        sp_buf[0] = 0; sp_field(i);
+        for (v = 0; sp_buf[v] && v < 39; v++) sp.f[i][v] = sp_buf[v];
+        sp.f[i][v] = 0;
+    }
+}
+
 static void ui_frame(void)                  /* ~60 times a second */
 {
     cs_service();                           /* (the kept clocks, when quiet) */
@@ -1667,25 +1980,26 @@ static void ui_frame(void)                  /* ~60 times a second */
             if (now - ui.intro_at >= 33u) { ui.intro_at = now; draw_intro(now - ui.intro_t0); }
             ui.activity = 0;
             ui_leds();
+            ann_tick(now);
             return;
         }
     }
     ui.activity = 0;
-    if (eng_file.pending) { ui_leds(); return; }   /* a load on its way: the main loop gets to it first, the
+    if (eng_file.pending) { ui_leds(); ann_tick(now); return; }   /* a load on its way: the main loop gets to it first, the
                                              * screen after (a MIDI Start sounds at once) */
     if (ui.load_wait && !eng_file.pending) {
         ui.load_wait = 0;
         ui.detecting = 0;
-        if (!eng_load_rc && set.output && eng_deck_off) ui_say(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
+        if (!eng_load_rc && set.output && eng_deck_off) ui_warn(set.output == ENG_OUT_CLOCK ? "RSID: NO MIDI CLOCK" : "RSID: NO ASID, EMULATED SID ONLY", 0);
         else if (!eng_load_rc && set.output == ENG_OUT_CLOCK && eng_clk_tried) {   /* the beat the load found (a paused
                                              * load looks at its first PLAY) */
             char b[36] = "MIDI CLOCK: ";
             if (eng_clk_bpm_x10) {
                 ui_bpm_text(b + ui_strlen(b), clk_bpm_x10(0)); ui_cat(b, ui.clk_saved ? " BPM, KEPT" : " BPM"); ui_say(b, 0);
                 if (!eng_clk_manual) cs_found(ui.cur, ui.subsong);   /* (its next load: no look) */
-            } else ui_say("NO TEMPO FOUND: SET ONE WITH GLO K4", 0);
+            } else ui_warn("NO TEMPO FOUND: SET ONE WITH GLO K4", 0);
         }
-        if (eng_load_rc) { ui.cur = -1; ui_say(eng_load_rc == -5 ? "BASIC TUNE: NOT SUPPORTED" : eng_load_rc == -6 ? "2SID / 3SID TUNE: NOT SUPPORTED" : "CANNOT PLAY THIS FILE", 0); }
+        if (eng_load_rc) { ui.cur = -1; ui_warn(eng_load_rc == -5 ? "BASIC TUNE: NOT SUPPORTED" : eng_load_rc == -6 ? "2SID / 3SID TUNE: NOT SUPPORTED" : "CANNOT PLAY THIS FILE", 0); }
         ui.dirty_top = ui.dirty_list = 1;
     }
     if (eng_loaded && eng_playing && ui.cur >= 0 && !ui.ended) {   /* the end of the song: stop and wait for SELECT */
@@ -1698,7 +2012,7 @@ static void ui_frame(void)                  /* ~60 times a second */
             ui.dirty_top = 1;
         }
     }
-    if (eng_loaded && !eng_playing && c64.fault && ui.cur >= 0 && !ui.ended) { ui.ended = 1; ui_say("THE TUNE CRASHED", 0); }
+    if (eng_loaded && !eng_playing && c64.fault && ui.cur >= 0 && !ui.ended) { ui.ended = 1; ui_warn("THE TUNE CRASHED", 0); }
     if (ui.mode == UI_SONGS) {
         if (ui.dirty_top || now - ui.top_at > 1000u) { ui.dirty_top = 0; ui.top_at = now; draw_top(); }
         if (ui.dirty_list) { ui.dirty_list = 0; draw_list(); }
@@ -1707,8 +2021,11 @@ static void ui_frame(void)                  /* ~60 times a second */
         if (ui.dirty_voices || now - ui.voices_at >= 33u) { ui.dirty_voices = 0; ui.voices_at = now; draw_voices(); }
         if (ui.dirty_filter || now - ui.filter_at > 100u) { ui.dirty_filter = 0; ui.filter_at = now; draw_filter(); }
     }
+    if (ann_on() && now - sp_turn_t < 800u) ui.dirty_status = 1;   /* (a reader, a knob turning: the value as it is) */
     if (ui.dirty_status || now - ui.status_at > 500u) { ui.dirty_status = 0; ui.status_at = now; draw_status(); }
     ui_leds();
+    speak(now);                             /* the screen reader: what changed (after the status line's fields) */
+    ann_tick(now);
 }
 
 static void ui_input_only(void) { ui_input(); }

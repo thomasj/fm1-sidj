@@ -8,6 +8,7 @@ PY="${PYTHON:-python3}"
 [ -x .venv/bin/python3 ] && PY=.venv/bin/python3
 mkdir -p build/gen build/host
 [ -f build/gen/felucca_font.h ] || "$PY" tools/gen_font.py build/gen/felucca_font.h >/dev/null
+"$PY" tools/gen_words.py firmware/words.tsv web/words build/gen/ann_words.h >/dev/null   # the screen reader's words
 U="sid/sid.c sid/sid_tables.c firmware/src/app/engine.c firmware/src/app/remix.c firmware/src/app/asid.c firmware/src/c64/cpu6502.c firmware/src/c64/c64.c firmware/src/c64/sidfile.c"
 # shellcheck disable=SC2086
 $CC -O2 -std=c99 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter \

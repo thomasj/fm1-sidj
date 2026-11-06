@@ -1,0 +1,74 @@
+# The screen reader (announce.c, fm1-reader): silent until a reader's HELLO; then the screen and its
+# values, the song list's rows (a new composer first), the song loaded, play and pause, a page and
+# its values, a knob's value as it turns (not the values the tune moves by itself), the remix's
+# switches, messages, warnings, and the whole screen again on WHERE; nothing while ASID streams to a
+# real chip (its timing first; the output's own message goes just before it starts), and again once paused
+sid @SID1@ 2350
+sid @SID2@ 1000
+wait 4500
+listen
+wait 400
+said SONGS. 2 SONGS
+turn SELECT -1
+wait 400
+said Martin Galway. Wizball, 1 OF 2
+turn SELECT 1
+wait 400
+said Rob Hubbard. Commando, 2 OF 2
+tap PLAY
+wait 4500
+said PLAYER. Commando BY Rob Hubbard. SUBSONG 1 OF 19. PLAYING
+tap PLAY
+wait 300
+said PAUSED
+tap PLAY
+wait 300
+said PLAYING
+tap ENV
+wait 500
+said PAGE ENV, VOICE 1. A
+turn K1 2
+wait 900
+said A 2
+press SAVE
+tap REC
+release SAVE
+wait 300
+said VOICE 1 MUTED. VOICE 3 MUTED.
+press HOME
+tap ENV
+release HOME
+wait 300
+said VOICE 1 SAWTOOTH.
+tap GLO
+wait 500
+said PAGE GLO. TEMPO 100%
+turn K1 3
+wait 900
+said TEMPO
+tap OCT-
+tap OCT+
+press OCT-
+press OCT+
+wait 200
+release OCT-
+release OCT+
+wait 300
+said REMIX RESET
+tap LFO
+wait 500
+where
+wait 400
+said PLAYER. Commando BY Rob Hubbard. SUBSONG 1 OF 19. PLAYING
+turn ALGO 1
+wait 300
+said OUTPUT: ASID
+tap ENV
+wait 500
+quiet
+tap PLAY
+wait 400
+said PAUSED
+turn ALGO -1
+wait 300
+said OUTPUT: EMULATED SID

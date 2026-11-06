@@ -272,6 +272,7 @@ static void songs_service(void)
     uint8_t cmd, out[300];
     if (sx_usb_at && (int32_t)(plat_ms() - sx_usb_at) >= 0) { sx_usb_at = 0; plat_usb_audio_mode(set.usb4); }
     if (!ota_frame_get(&p, &n)) return;
+    if (ann_frame(p, n, plat_ms())) { ota_frame_done(); return; }   /* a screen reader's (F0 7D 53 52: announce.c) */
     if (n < 3 || p[0] != 0x7D || p[1] != 'S') return;      /* not ours: ota.c's turn */
     cmd = p[2];
     d = sx_unpack7(p + 3, n - 3, sx_dec, sizeof sx_dec);

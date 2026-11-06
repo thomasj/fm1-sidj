@@ -40,6 +40,8 @@ echo "release: building SiDJ $V"
 ./build.sh --release "$V" > build/release-build.log 2>&1 || { tail -20 build/release-build.log; die "the build failed (build/release-build.log)"; }
 grep -qi "failed" build/release-build.log && die "the build log says failed (build/release-build.log)"
 [ -f "$PKG" ] || die "no $PKG after the build"
+WORDS=$(sed -n 's#.*/words/\([0-9a-f]*\.json\)".*#\1#p' build/gen/ann_words.h)   # the screen reader's words file the build links to
+git ls-files --error-unmatch "web/words/$WORDS" >/dev/null 2>&1 || die "web/words/$WORDS is not committed: the release's screen reader link would not work"
 echo "release: testing"
 tests/run_tests.sh > build/release-tests.log 2>&1 || { tail -20 build/release-tests.log; die "the tests failed (build/release-tests.log)"; }
 

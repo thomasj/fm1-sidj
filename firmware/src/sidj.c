@@ -177,6 +177,19 @@ static int song_prog(uint32_t off, const uint8_t *src, uint32_t n)
 }
 static void songs_changed(void);            /* the song store changed over USB (songs.c -> the UI) */
 static int songs_play_request(int k, int subsong);
+/* the screen reader (fm1-reader, announce.c from fm1-base): what the screen says, to a reader on the computer */
+#define ANN_NAME "SiDJ " SIDJ_VERSION
+#define ANN_DATA __attribute__((section(".pool")))   /* (zeroed at start; the RAM region is full) */
+#include "ann_words.h"
+#include "announce.c"
+static int ann_wire_send(const uint8_t *p, uint32_t n)   /* never waits: no room, or nobody reading: not sent */
+{
+    if (n > 4u && p[4] == ANN_SAY && eng_asid_streaming())
+        return -1;                          /* ASID's timing to a real chip comes first: no SAY while it streams */
+    if (!usb.config || usb.suspended || SXQ - (so_w - so_r) < (n + 2u) / 3u)
+        return -1;
+    return ota_wire_send(p, n);
+}
 #include "app/settings.c"
 #include "app/songs.c"
 #include "app/panel.c"

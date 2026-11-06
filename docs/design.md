@@ -153,7 +153,22 @@ file without a known length plays until the user skips it.
 The transfer is SysEx over USB-MIDI, `F0 7D 'S' cmd payload F7` with the payload packed 7
 bytes into 8: info, entry, put (begin, data, end with a CRC), get, delete, wipe, play, and for
 testing stats, output, rx and usb. `tools/fm1_sid.py` and the web page
-(`web/site/fm1songs.js`) both speak it.
+(`web/site/fm1songs.js`) both speak it. A screen reader's frames, `F0 7D 53 52 ...`, share the
+prefix and go to `announce.c` first.
+
+## The screen reader
+
+For [fm1-reader](https://github.com/charlesvestal/fm1-reader): `announce.c` (fm1-base's, unchanged)
+answers a reader's HELLO with SiDJ's name and the link to its words file, and sends nothing until one
+comes. `speak()` in `ui.c` compares the screen with the last frame and says what changed: the screen
+and page with their values on WHERE or a change, a knob's value as it turns (only the turned knob's,
+not values the tune moves itself), the song list's row, the song loaded, play and pause, and the
+remix's switches; every message goes too, warnings kept whole. The status line's fields are recorded
+as they are drawn, so what is said is what is shown. The screen's text goes as it is: `firmware/words.tsv`,
+built by `gen_words.py` into `web/words/<fingerprint>.json` and published with the site, says how to
+read it. Nothing is said while ASID streams (a song playing with output ASID or both), so a real
+chip's timing comes first; and `usb.c` finishes an ASID message before a reader's starts, so neither
+is cut.
 
 ## The user interface
 
@@ -177,10 +192,12 @@ with the panel on a page: songs added from the page, the ASID stream to Web MIDI
   remix, the ASID sink, the storage, the encoder, the beat finder, the song unpacker against
   zlib, the rescue tool against a fake update mode.
 - Scenarios in the simulator (the songs, the player, the remix, ASID, the MIDI clock out and
-  in), with HVSC tunes when HVSC is on the machine (the files are not committed: HVSC's own
+  in, the screen reader with `said` checks), with HVSC tunes when HVSC is on the machine (the files are not committed: HVSC's own
   terms).
 - The update path against the package: the update entry, the loader, the installer.
 - The browser emulator headless in node.
+- What the screen reader can say (`speakdump` and every scenario's SAYs) through fm1-reader's audit:
+  real words, no symbols, warnings that say what did not happen.
 - The C64 against libsidplayfp's own C64 (README, Verification): the SID write sequences of
   random HVSC tunes compared, with a logging SID in place of the emulation.
 

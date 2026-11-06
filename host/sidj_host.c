@@ -49,6 +49,8 @@
  *   mark                         remember the frame count and the scopes' (expect dframes, dscope)
  *   reboot                       re-run boot from the simulated flash (persistence test)
  *   echo TEXT
+ *   listen | where | said TEXT | quiet   the screen reader: a reader's HELLO kept up, its WHERE, a SAY since
+ *                                the last check holding TEXT, none since it; speakdump: every screen's text
  */
 #define SIDJ_HOST 1
 #include <stdio.h>
@@ -249,6 +251,40 @@ static int ota_wire_send(const uint8_t *p, uint32_t n)
     sxo_n += n;
     return 0;
 }
+/* the screen reader (announce.c, as on the FM-1): each SAY is kept for the scripts (`listen`, `said`),
+ * logged to $SIDJ_SAID_LOG (the audit's messages: MSG / WARN, a tab, the text), and in the browser
+ * build goes out with the song transfer's answers, for the emulator page to speak */
+#define ANN_NAME "SiDJ " SIDJ_VERSION
+#define ANN_DATA __attribute__((section(".pool")))
+#include "ann_words.h"
+#include "../firmware/src/announce.c"
+static char said_buf[16384];                /* the SAYs since the last `said` check, a line each */
+static uint32_t said_len;
+static FILE *said_log;
+static int host_listen;                     /* a reader listens (its HELLO kept up) */
+static int ann_wire_send(const uint8_t *p, uint32_t n)
+{
+    if (n > 4 && p[4] == ANN_SAY && eng_asid_streaming()) return -1;   /* (as on the FM-1: none while ASID streams) */
+    if (n > 7 && p[4] == ANN_SAY) {
+        uint32_t i, k = n - 7;              /* F0 7D 53 52 cmd flags text.. F7 */
+        if (said_len + k + 2 < sizeof said_buf) {
+            for (i = 0; i < k; i++) said_buf[said_len++] = (char)p[6 + i];
+            said_buf[said_len++] = '\n';
+            said_buf[said_len] = 0;
+        }
+        if (said_log) fprintf(said_log, "%s\t%.*s\n", (p[5] & ANN_KEEP) ? "WARN" : "MSG", (int)k, (const char *)p + 6);
+    }
+#ifdef SIDJ_WEB
+    return ota_wire_send(p, n);
+#else
+    return 0;
+#endif
+}
+static void host_hello(void)                /* a reader's HELLO, as the page sends it */
+{
+    static const uint8_t h[] = {0x7D, 0x53, 0x52, 1, 1};
+    ann_frame(h, sizeof h, plat_ms());
+}
 static void songs_changed(void);
 static int songs_play_request(int k, int subsong);
 #include "../firmware/src/app/songs.c"
@@ -378,6 +414,7 @@ static void run_ms(uint32_t ms)
             audio_due_ms += 256.0 * 1000.0 / 44100.0;
         }
         eng_poll();                             /* a song load, as the FM-1's main loop does it */
+        if (host_listen) ann.heard = plat_ms(); /* (the reader's HELLO every 2 s, kept up) */
         songs_service();                        /* the main loop's SysEx turn, as on the FM-1 */
         if (now_ms >= ui_due) { ui_due = now_ms + 16; ui_frame(); }
         else ui_input_only();
@@ -535,7 +572,9 @@ int main(int argc, char **argv)
     sc = fopen(argv[1], "r");
     if (!sc) { perror(argv[1]); return 2; }
     memset(pool, 0xff, sizeof pool);
+    if (getenv("SIDJ_SAID_LOG")) { said_log = fopen(getenv("SIDJ_SAID_LOG"), "a"); host_listen = 1; }
     boot();
+    if (host_listen) host_hello();          /* (listening from boot) */
     while (fgets(line, sizeof line, sc)) {
         char cmd[32] = {0}, a[256] = {0}, b[64] = {0}, c[64] = {0};
         lineno++;
@@ -644,6 +683,22 @@ int main(int argc, char **argv)
         } else if (!strcmp(cmd, "expect")) fails += expect(a, b);
         else if (!strcmp(cmd, "reboot")) boot();
         else if (!strcmp(cmd, "echo")) printf("%s", line + 5);
+        else if (!strcmp(cmd, "speakdump")) speak_dump();
+        else if (!strcmp(cmd, "listen")) { host_listen = 1; host_hello(); said_len = 0; said_buf[0] = 0; run_ms(20); }
+        else if (!strcmp(cmd, "where")) { static const uint8_t w[] = {0x7D, 0x53, 0x52, 3}; ann_frame(w, sizeof w, plat_ms()); run_ms(20); }
+        else if (!strcmp(cmd, "quiet")) {       /* quiet: no SAY since the last check */
+            if (said_len) { printf("  FAIL quiet: said\n%s", said_buf); fails++; } else printf("  ok   quiet\n");
+            said_len = 0; said_buf[0] = 0;
+        }
+        else if (!strcmp(cmd, "said")) {        /* said TEXT: a SAY since the last check holds TEXT */
+            char *t = line + 4, *e;
+            while (*t == ' ') t++;
+            e = t + strlen(t);
+            while (e > t && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
+            if (!strstr(said_buf, t)) { printf("  FAIL said \"%s\": not in\n%s", t, said_buf); fails++; }
+            else printf("  ok   said \"%s\"\n", t);
+            said_len = 0; said_buf[0] = 0;
+        }
         else { printf("line %d: unknown command %s\n", lineno, cmd); return 2; }
     }
     wav_close();
