@@ -24,7 +24,8 @@ the Felucca tree unless marked `x0x/`. Nothing here comes from the vendor.
   runs while XIP is off), RAM **96 KiB** for .data/.bss, POOL **336 KiB** for large NOLOAD
   buffers (section `.pool`), user stack ~24 KiB, supervisor/ISR stack ~8 KiB, NOINIT ~15 KiB
   (crash record, settings, survives reset), boot state and vector table at the top.
-- **Flash**: 1 MiB SPI NOR (JEDEC 0x856014), 4 KiB sectors, 256 B pages. Code and rodata run
+- **Flash**: 1 MiB SPI NOR (JEDEC 0x856014, Puya P25Q80; units sold since autumn 2026 carry a UC25HQ80,
+  0xB36014, with the same commands), 4 KiB sectors, 256 B pages. Code and rodata run
   in place (XIP) through a 32 B-line cache; flash offset `off` appears at
   `0x02000000 + off - 0x4000`. App slot 0x4000-0x93000 (app.bin at +0x120, max 581,564 B),
   SFC-encrypted with chip key 0x980F. Above 0x93000 the firmwares differ: Felucca's data

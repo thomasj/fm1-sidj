@@ -25,8 +25,9 @@ def check(name, ok):
 
 class FakeUboot(R.Uboot):
     """The chip's update mode with its flash loader running, as the tool sees it."""
-    def __init__(self, flash):
+    def __init__(self, flash, fid=0x856014):
         super().__init__(None)
+        self.fid = fid
         self.flash = bytearray(flash)
         self.erased = []
         self.ran = False
@@ -38,7 +39,7 @@ class FakeUboot(R.Uboot):
         pass
 
     def chip(self):
-        return 0x980F, 3, 0x856014
+        return 0x980F, 3, self.fid
 
     def read(self, addr, n):
         return bytes(self.flash[addr:addr + n])
@@ -61,8 +62,8 @@ def image(head_byte, size, seed):
     return bytes([head_byte]) * R.WRITE_MIN + bytes(rnd.getrandbits(8) for _ in range(size - R.WRITE_MIN))
 
 
-def run(packages, flash, write=True):
-    dev = FakeUboot(flash)
+def run(packages, flash, write=True, fid=0x856014):
+    dev = FakeUboot(flash, fid)
     out = []
     try:
         dev_ok = R.rescue(dev, packages, b"", write, BACKUPS, say=lambda *a, **k: out.append(" ".join(map(str, a))))
@@ -92,6 +93,12 @@ check("V15: only sectors in [0x4000, 0x93000) erased",
 flash = v16[:R.WRITE_MIN] + rest[R.WRITE_MIN:]
 dev, ok, err = run(packages, flash)
 check("a V16 head picks V16 and writes it", ok is True and bytes(dev.flash) == v16 + flash[0xA9000:])
+
+dev, ok, err = run(packages, flash, fid=0xB36014)
+check("a UC25HQ80 flash (B36014, newer units) is written the same", ok is True and bytes(dev.flash) == v16 + flash[0xA9000:])
+
+dev, ok, err = run(packages, flash, fid=0xEF4014)
+check("a flash it does not know: refused, nothing written", err is not None and not dev.erased and bytes(dev.flash) == flash)
 
 flash = bytes([0x42]) * R.WRITE_MIN + rest[R.WRITE_MIN:]
 dev, ok, err = run(packages, flash)

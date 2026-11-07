@@ -10,7 +10,13 @@
 <meta name="description" content="SiDJ turns the M-VAVE FM-1 into a C64 music deck: every tune in the High Voltage SID Collection on a cycle-exact Commodore 64, remixed live from the panel, out to real SID chips and over USB audio. Free and open source.">
 <meta property="og:title" content="SiDJ · SID player and live remixer for the M-VAVE FM-1">
 <meta property="og:description" content="Forty years of C64 music on the FM-1, remixed live: transpose, mute, solo, filter, LFOs, tempo and a vinyl fader. Free and open source.">
-<meta property="og:image" content="img/remix.png">
+<meta property="og:image" content="https://thomasj.github.io/fm1-sidj/img/social.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:url" content="https://thomasj.github.io/fm1-sidj/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://thomasj.github.io/fm1-sidj/img/social.png">
 <meta name="theme-color" content="#08090c">
 <style>
 :root {
@@ -660,8 +666,9 @@ const progress = (p) => { $("songbar").hidden = false; $("songbar").value = Math
 
 async function refresh() {
   const info = await songs.info(), list = await songs.list();
-  $("usedbar").style.width = `${Math.round(100 * info.used / info.size)}%`;
-  $("usedtxt").textContent = `${list.filter(Boolean).length} songs, ${Math.round(100 * info.used / info.size)}% of ${Math.round(info.size / 1024)} KB used`;
+  const pct = info.used <= info.size ? Math.round(100 * info.used / info.size) : 0;   // (an FM-1 whose flash SiDJ 1.5 did not know: 0)
+  $("usedbar").style.width = `${pct}%`;
+  $("usedtxt").textContent = `${list.filter(Boolean).length} songs, ${pct}% of ${Math.round(info.size / 1024)} KB used`;
   const tb = $("list");
   tb.textContent = "";
   list.forEach((e, k) => {

@@ -295,7 +295,7 @@ static void fm1_main(void)
         fm1_sysvdd_raise(15);               /* 1.60 V, then 1.38 V (fm1_sys.h, from X0X) */
         supply_vdc14 = (uint8_t)fm1_vdc14();
         supply_sysvdd = (uint8_t)fm1_sysvdd();
-        flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the expected 1 MiB part, else RAM only */
+        flash_ok = FL_JEDEC_OK(FL_FAR(fl_jedec_ram)());  /* a known 1 MiB part (fm1_flash.h), else RAM only */
         if (flash_ok && fm1_clock_v16()) {  /* M-VAVE's V16 boot loader: 320 MHz; to 360 as V15's (fm1_sys.h) */
             fm1_pll2_540();
             FL_FAR(fl_clock_v15_ram)();

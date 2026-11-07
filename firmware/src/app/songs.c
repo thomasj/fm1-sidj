@@ -46,7 +46,7 @@ static int song_prog(uint32_t off, const uint8_t *src, uint32_t n);   /* 0 = ok,
 
 static uint32_t song_index[SONG_MAX_ENTRIES];                 /* flash offsets of the live entries */
 static int song_count;
-static uint32_t song_end;                                     /* where the next entry goes */
+static uint32_t song_end = SONG_POOL_BASE;                    /* where the next entry goes */
 
 static uint16_t song_crc16(const uint8_t *p, uint32_t n)
 {

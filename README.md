@@ -199,8 +199,14 @@ speed whichever official firmware the FM-1 had before: M-VAVE's V16 leaves the c
 instead of V15's 360, and SiDJ sets 360 back up as it starts. If something goes wrong:
 two failed starts give a safe mode (PLAY tries again), four give the chip's own update mode,
 and holding `OCT-` and `OCT+` together for 5 seconds gets there too. From the chip's update mode,
-`tools/fm1_rescue.sh` puts the official firmware back, and Leo Kuroshita's
+Julius Vitkauskas's [M-Flasher](https://github.com/jvitkauskas/m-flasher) (Windows, macOS, Linux)
+backs up the flash and installs SiDJ's package or M-VAVE's. `tools/fm1_rescue.sh` (macOS) puts the
+official firmware back, and Leo Kuroshita's
 [FM-1 Transporter](https://github.com/kurogedelic/FM-1-transporter) is the last resort.
+
+**Newer FM-1s.** Units sold since autumn 2026 have a different flash chip (UC25HQ80). SiDJ 1.5.0
+does not know it: it cannot save songs or settings there and refuses updates from the page. Hold
+`OCT-` and `OCT+` for 5 seconds and install SiDJ 1.5.1 or later with M-Flasher.
 
 **Other firmwares' data.** SiDJ keeps its songs from 0x93000 to 0xF2FFF, over the flash where
 Felucca and the firmwares built on it keep their samples and projects. Adding songs erases what
