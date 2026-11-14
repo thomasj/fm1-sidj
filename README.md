@@ -359,3 +359,5 @@ synth music as **tubesockor**:
 
 SiDJ is developed with the help of AI coding tools: I direct the work, review it and test it on
 the FM-1.
+
+You can also try SiDJ in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
